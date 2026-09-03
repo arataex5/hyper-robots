@@ -79,6 +79,13 @@ body {
   padding: 3px 10px;
   font-family: "Space Grotesk", sans-serif;
 }
+.mode-badge.hidden { display: none; }
+#room-id-badge {
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text);
+  border-color: #5a7fd6;
+}
 
 .topbar .btn { margin-left: auto; }
 
@@ -1375,32 +1382,104 @@ body.title-active { overflow: hidden; }
   border-color: #5a7fd6;
   color: var(--text);
 }
+.online-hud-chip.is-disconnected {
+  opacity: 0.6;
+  border-style: dashed;
+}
 .online-hud-race {
   min-height: 1.2em;
   font-size: 0.8rem;
   color: var(--text-dim);
   text-align: center;
 }
-.online-hud-roomid {
-  min-height: 1.1em;
-  margin-bottom: 4px;
-  font-size: 0.72rem;
-  color: var(--text-faint);
-  text-align: center;
-  letter-spacing: 0.05em;
+
+.next-ready-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 930;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(8, 10, 16, 0.72);
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
 }
-.online-hud-roomid span {
+.next-ready-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.next-ready-card {
+  width: min(94vw, 420px);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  padding: 24px 20px;
+  text-align: center;
+  box-shadow: 0 30px 70px -25px rgba(0,0,0,0.7);
+}
+.next-ready-heading {
+  margin: 0 0 16px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.next-ready-player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.next-ready-player-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+.next-ready-player-row.disconnected { opacity: 0.6; border-style: dashed; }
+.next-ready-player-avatar {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  background: #10141f;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+}
+.next-ready-player-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.next-ready-player-status {
+  flex: none;
+  font-size: 0.68rem;
   font-family: "Space Grotesk", sans-serif;
   font-weight: 700;
-  color: var(--text-dim);
-  letter-spacing: 0.15em;
-}
-.online-hud-nextready {
-  min-height: 1.1em;
-  font-size: 0.78rem;
+  padding: 3px 9px;
+  border-radius: 999px;
   color: var(--text-faint);
-  text-align: center;
+  border: 1px solid var(--line);
 }
+.next-ready-player-status.is-ready {
+  color: #fff;
+  background: linear-gradient(180deg, #4bb679, #359a5e);
+  border-color: #3a9a5f;
+}
+#btn-online-next-ready.hidden { display: none; }
 
 .giveup-banner {
   position: fixed;

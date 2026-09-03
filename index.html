@@ -174,10 +174,11 @@
         <div class="player-badge-avatar" id="player-badge-avatar"></div>
         <span id="player-badge-name"></span>
       </div>
-      <span class="mode-badge">一人用モード</span>
+      <span class="mode-badge" id="play-mode-badge">一人用モード</span>
       <span class="mode-badge" id="color-mode-badge">4色モード</span>
       <span class="mode-badge" id="diagonal-mode-badge" style="display:none;">斜め壁あり</span>
       <span class="mode-badge" id="cleared-badge">クリア: 0</span>
+      <span class="mode-badge hidden" id="room-id-badge"></span>
       <button id="btn-back-title" class="btn">🏠 タイトルへ戻る</button>
       <button id="btn-new-map" class="btn">🔀 新しいマップ</button>
     </header>
@@ -216,14 +217,19 @@
       <button id="btn-online-reset" class="btn">⟲ リセット</button>
       <button id="btn-online-declare" class="btn btn-primary" disabled>📣 回答する</button>
       <button id="btn-online-giveup" class="btn btn-accent">🏳️ 答えが知りたい！（ギブアップ）</button>
-      <button id="btn-online-next-ready" class="btn btn-primary hidden">👍 次の問題へ進む準備完了</button>
     </section>
 
     <div class="online-hud hidden" id="online-hud">
-      <div class="online-hud-roomid" id="online-hud-roomid"></div>
       <div class="online-hud-players" id="online-hud-players"></div>
       <div class="online-hud-race" id="online-hud-race"></div>
-      <div class="online-hud-nextready" id="online-hud-nextready"></div>
+    </div>
+
+    <div id="next-ready-overlay" class="next-ready-overlay hidden">
+      <div class="next-ready-card">
+        <h2 class="next-ready-heading">次の問題へ進む準備はいいですか？</h2>
+        <div class="next-ready-player-list" id="next-ready-player-list"></div>
+        <button id="btn-online-next-ready" class="btn btn-primary">👍 準備完了</button>
+      </div>
     </div>
 
     <p class="status-line" id="status-line"></p>

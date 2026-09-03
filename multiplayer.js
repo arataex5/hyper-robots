@@ -62,6 +62,7 @@
       declared: false, // 自分がこのラウンドで既に宣言したか
       myDeclaredMoves: null, // 宣言した時点の手順のスナップショット
       myGiveUpVoted: false,
+      giveUpVoters: new Set(), // ホスト側のみで使う集計用（チャンピオンへの降参カウント）
       countdownKind: null, // null | "declare" | "giveup" -- 今動いているカウントダウンの種類
       countdownInterval: null,
       countdownRemaining: 0,
@@ -309,10 +310,6 @@
   function refreshDeclareButtonState() {
     const btn = document.getElementById("btn-online-declare");
     if (!btn) return;
-    if (mp.declared) {
-      btn.disabled = true;
-      return;
-    }
     btn.disabled = !isGoalSatisfiedLocally();
   }
 
@@ -368,6 +365,7 @@
         const chip = document.createElement("span");
         chip.className = "online-hud-chip";
         chip.classList.toggle("is-host", p.peerId === (room_hostPeerId()));
+        chip.classList.toggle("is-disconnected", !isPlayerConnected(p));
         const avatarBox = document.createElement("div");
         avatarBox.className = "online-hud-chip-avatar";
         if (typeof window.renderProfileAvatar === "function") {
@@ -375,7 +373,8 @@
         }
         chip.appendChild(avatarBox);
         const textSpan = document.createElement("span");
-        textSpan.textContent = `${p.name || "プレイヤー"}: ${mp.scores[p.peerId] || 0}点`;
+        const disconnectedLabel = isPlayerConnected(p) ? "" : "［切断中］";
+        textSpan.textContent = `${p.name || "プレイヤー"}${disconnectedLabel}: ${mp.scores[p.peerId] || 0}点`;
         chip.appendChild(textSpan);
         playersBox.appendChild(chip);
       });
@@ -396,7 +395,13 @@
       return;
     }
     const p = mp.players.find((x) => x.peerId === mp.bestDeclare.peerId);
-    raceBox.textContent = `現在の最短宣言: ${p ? p.name : "?"} が ${mp.bestDeclare.moveCount}手（残り${mp.countdownRemaining}秒）`;
+    let text = `現在のチャンピオン: ${p ? p.name : "?"} が ${mp.bestDeclare.moveCount}手（残り${mp.countdownRemaining}秒）`;
+    const others = mp.players.filter((pl) => pl.peerId !== mp.bestDeclare.peerId);
+    const concedeCount = others.filter((pl) => mp.giveUpVoters.has(pl.peerId)).length;
+    if (others.length > 0 && concedeCount > 0) {
+      text += ` ／ 降参: ${concedeCount}/${others.length}人`;
+    }
+    raceBox.textContent = text;
   }
 
   function nextGoal() {
@@ -407,8 +412,8 @@
       return;
     }
     const goal = mp.targetQueue[mp.goalIndex];
-    mp.net.broadcast({ type: "goal-reveal", goal, robots: mp.robots });
-    applyGoalReveal(goal, mp.robots);
+    mp.net.broadcast({ type: "goal-reveal", goal, robots: mp.robots, goalIndex: mp.goalIndex });
+    applyGoalReveal(goal, mp.robots, mp.goalIndex);
   }
 
   // すべてのゴールが出そろったら対戦終了とする
@@ -439,8 +444,7 @@
     setControlsLocked(true);
     const giveUpBtn = document.getElementById("btn-online-giveup");
     if (giveUpBtn) giveUpBtn.disabled = true;
-    const nextReadyBtn = document.getElementById("btn-online-next-ready");
-    if (nextReadyBtn) nextReadyBtn.classList.add("hidden");
+    hideNextReadyOverlay();
     updateGoalsRemaining();
   }
 
@@ -459,9 +463,10 @@
     return a;
   }
 
-  function applyGoalReveal(goal, robots) {
+  function applyGoalReveal(goal, robots, goalIndex) {
     mp.isHost = window.HRNet.isHost(); // ホスト引き継ぎが起きていた場合に備えて毎ラウンド再確認する
     updateNewMapButtonForOnline();
+    if (goalIndex != null) mp.goalIndex = goalIndex; // ゲスト側の残りゴール数がホストと食い違わないように同期する
     mp.currentGoal = goal;
     mp.roundStartSnapshot = robots.map((p) => ({ ...p }));
     mp.robots = robots.map((p) => ({ ...p }));
@@ -469,14 +474,13 @@
     mp.declared = false;
     mp.myDeclaredMoves = null;
     mp.myGiveUpVoted = false;
+    mp.giveUpVoters = new Set();
     mp.countdownKind = null;
     hideGiveUpBanner();
     setControlsLocked(false);
     const giveUpBtn = document.getElementById("btn-online-giveup");
     if (giveUpBtn) giveUpBtn.disabled = false;
-    const nextReadyBtn = document.getElementById("btn-online-next-ready");
-    if (nextReadyBtn) nextReadyBtn.classList.add("hidden");
-    renderNextReadyStatus(0, 0);
+    hideNextReadyOverlay();
     stopCountdown();
     if (mp.selectedRobot !== null) {
       mp.robotEls[mp.selectedRobot].classList.remove("selected");
@@ -522,17 +526,17 @@
   const GIVEUP_TIMEOUT_SEC = 60;
 
   function declare() {
-    if (!mp.currentGoal || mp.declared || mp.matchOver) return;
+    if (!mp.currentGoal || mp.matchOver) return;
     if (!isGoalSatisfiedLocally()) {
       setStatus("まだ目標のマスに到達していません。ロボットを動かしてからもう一度「回答する」を押してください。");
       return;
     }
-    // 宣言した時点の手順を確定させ、以降に操作しても提出内容が変わらないようにする
-    mp.declared = true;
+    // 宣言した時点の手順を記録する（一時的なチャンピオン候補として）。
+    // この後さらにロボットを動かしても、この記録自体は変わらない。
+    // 押した後も操作はロックしない — このプレイヤー自身も、もっと短い
+    // 手順が見つかれば何度でも「回答する」を押し直してチャンピオンを
+    // 更新できる。
     mp.myDeclaredMoves = mp.moveHistory.slice(0, mp.historyIndex).map((m) => ({ robot: m.robot, dir: m.dir }));
-    setControlsLocked(true);
-    const giveUpBtn = document.getElementById("btn-online-giveup");
-    if (giveUpBtn) giveUpBtn.disabled = true;
     const msg = { type: "declare-update", peerId: mp.myPeerId, moveCount: mp.historyIndex };
     if (mp.isHost) {
       applyDeclare(msg);
@@ -723,10 +727,7 @@
     const p = mp.players.find((x) => x.peerId === msg.peerId);
     setStatus(`⚠️ ${p ? p.name : "?"} の宣言は手順を確認できませんでした。他の人はまだ宣言できます。`);
     if (msg.peerId === mp.myPeerId) {
-      // 自分の宣言が無効になった場合は、操作を再開できるようにする
-      mp.declared = false;
       mp.myDeclaredMoves = null;
-      setControlsLocked(false);
       refreshDeclareButtonState();
     }
     renderRaceStatus();
@@ -748,13 +749,16 @@
   }
 
   function giveUp() {
-    if (!mp.currentGoal || mp.myGiveUpVoted || mp.declared || mp.countdownKind !== null || mp.matchOver) return;
+    if (!mp.currentGoal || mp.myGiveUpVoted || mp.matchOver) return;
+    if (mp.countdownKind === "giveup") return; // 既にギブアップ待ち中
+    // チャンピオン自身は「自分に降参する」ことはできない
+    if (mp.bestDeclare && mp.bestDeclare.peerId === mp.myPeerId) return;
     mp.myGiveUpVoted = true;
     const btn = document.getElementById("btn-online-giveup");
     if (btn) btn.disabled = true;
-    const msg = { type: "giveup-start", peerId: mp.myPeerId };
+    const msg = { type: "giveup-vote", peerId: mp.myPeerId };
     if (mp.isHost) {
-      applyGiveUpStart(msg);
+      applyGiveUpVote(msg);
     } else {
       mp.net.broadcast(msg);
     }
@@ -764,6 +768,35 @@
     const list = window.HRNet.getPeerList().filter((p) => p.connected).map((p) => p.peerId);
     list.push(mp.myPeerId);
     return list;
+  }
+
+  // ギブアップボタンは文脈によって意味が変わる:
+  //   ・まだ誰もチャンピオンになっていない -> 「誰も分からない、コンピュータに見せてほしい」(60秒タイマー)
+  //   ・すでにチャンピオンがいる -> 「このチャンピオンに降参する」(チャンピオン以外全員が降参したら即決着)
+  function applyGiveUpVote(msg) {
+    if (!mp.isHost) return;
+    mp.giveUpVoters.add(msg.peerId);
+
+    if (mp.bestDeclare) {
+      const championId = mp.bestDeclare.peerId;
+      const others = activePeerIds().filter((id) => id !== championId);
+      const total = others.length;
+      const count = others.filter((id) => mp.giveUpVoters.has(id)).length;
+      const tally = { type: "giveup-concede-tally", giveUpPeerIds: Array.from(mp.giveUpVoters) };
+      mp.net.broadcast(tally);
+      applyGiveUpConcedeTally(tally);
+      if (total > 0 && count >= total) {
+        stopCountdown();
+        requestVerification();
+      }
+    } else if (mp.countdownKind === null) {
+      applyGiveUpStart(msg);
+    }
+  }
+
+  function applyGiveUpConcedeTally(msg) {
+    mp.giveUpVoters = new Set(msg.giveUpPeerIds || []);
+    renderRaceStatus();
   }
 
   function applyGiveUpStart(msg) {
@@ -835,23 +868,59 @@
   }
 
   // ================= 次の問題への準備確認 =================
-  // ラウンドが終わった直後に自動で次のお題へ進めるのではなく、全員が
-  // 「準備完了」を押すのを待ってから次のゴールを表示する。
+  // ラウンドが終わった直後（コンピュータの答え合わせ、または誰かの得点の
+  // 後）にだけ、でかでかとしたオーバーレイでプレイヤー一覧と準備状況を
+  // 表示し、全員が「準備完了」を押すのを待ってから次のゴールを表示する。
 
-  function renderNextReadyStatus(count, total) {
-    const box = document.getElementById("online-hud-nextready");
-    if (box) box.textContent = total ? `👍 次の問題へ進む準備: ${count}/${total}人` : "";
+  function isPlayerConnected(p) {
+    if (p.peerId === mp.myPeerId) return true;
+    const netP = window.HRNet.getPeerList().find((x) => x.peerId === p.peerId);
+    return netP ? netP.connected : false;
+  }
+
+  function renderNextReadyPlayerList() {
+    const list = document.getElementById("next-ready-player-list");
+    if (!list) return;
+    list.innerHTML = "";
+    mp.players.forEach((p) => {
+      const row = document.createElement("div");
+      row.className = "next-ready-player-row" + (isPlayerConnected(p) ? "" : " disconnected");
+
+      const avatar = document.createElement("div");
+      avatar.className = "next-ready-player-avatar";
+      if (typeof window.renderProfileAvatar === "function") {
+        window.renderProfileAvatar(avatar, p.profile);
+      }
+      row.appendChild(avatar);
+
+      const name = document.createElement("span");
+      name.className = "next-ready-player-name";
+      name.textContent = (p.name || "プレイヤー") + (isPlayerConnected(p) ? "" : "［切断中］");
+      row.appendChild(name);
+
+      const status = document.createElement("span");
+      const isReady = mp.readyForNext.has(p.peerId);
+      status.className = "next-ready-player-status" + (isReady ? " is-ready" : "");
+      status.textContent = isReady ? "準備完了" : "未準備";
+      row.appendChild(status);
+
+      list.appendChild(row);
+    });
   }
 
   function awaitNextRoundReady() {
     mp.readyForNext = new Set();
     mp.myReadyForNext = false;
+    const overlay = document.getElementById("next-ready-overlay");
+    if (overlay) overlay.classList.remove("hidden");
     const btn = document.getElementById("btn-online-next-ready");
-    if (btn) {
-      btn.classList.remove("hidden");
-      btn.disabled = false;
-    }
-    renderNextReadyStatus(0, activePeerIds().length);
+    if (btn) btn.disabled = false;
+    renderNextReadyPlayerList();
+  }
+
+  function hideNextReadyOverlay() {
+    const overlay = document.getElementById("next-ready-overlay");
+    if (overlay) overlay.classList.add("hidden");
   }
 
   function nextRoundReady() {
@@ -873,20 +942,18 @@
     const active = activePeerIds();
     const total = active.length;
     const count = active.filter((id) => mp.readyForNext.has(id)).length;
+    const tally = { type: "next-ready-tally", readyPeerIds: Array.from(mp.readyForNext) };
+    mp.net.broadcast(tally);
+    applyNextReadyTally(tally);
     if (total > 0 && count >= total) {
-      const btn = document.getElementById("btn-online-next-ready");
-      if (btn) btn.classList.add("hidden");
-      renderNextReadyStatus(0, 0);
+      hideNextReadyOverlay();
       nextGoal();
-    } else {
-      const tally = { type: "next-ready-tally", count, total };
-      mp.net.broadcast(tally);
-      applyNextReadyTally(tally);
     }
   }
 
   function applyNextReadyTally(msg) {
-    renderNextReadyStatus(msg.count, msg.total);
+    mp.readyForNext = new Set(msg.readyPeerIds || []);
+    renderNextReadyPlayerList();
   }
 
   // ================= 切断通知（でかでかバナー） =================
@@ -908,7 +975,7 @@
   window.handleOnlineGameMessage = function (msg) {
     if (!mp) return;
     if (msg.type === "goal-reveal") {
-      applyGoalReveal(msg.goal, msg.robots);
+      applyGoalReveal(msg.goal, msg.robots, msg.goalIndex);
     } else if (msg.type === "declare-update") {
       if (mp.isHost) {
         applyDeclare(msg);
@@ -926,8 +993,10 @@
       applyRoundResult(msg);
     } else if (msg.type === "round-invalid") {
       applyRoundInvalid(msg);
-    } else if (msg.type === "giveup-start") {
-      if (mp.isHost) applyGiveUpStart(msg);
+    } else if (msg.type === "giveup-vote") {
+      if (mp.isHost) applyGiveUpVote(msg);
+    } else if (msg.type === "giveup-concede-tally") {
+      applyGiveUpConcedeTally(msg);
     } else if (msg.type === "giveup-countdown-start") {
       mp.countdownKind = "giveup";
       applyGiveUpCountdownStart(msg);
@@ -1006,9 +1075,17 @@
     document.getElementById("online-controls").classList.remove("hidden");
     document.getElementById("online-hud").classList.remove("hidden");
     updateNewMapButtonForOnline();
-    const roomIdEl = document.getElementById("online-hud-roomid");
-    if (roomIdEl && window.HRNet && window.HRNet.getRoomId()) {
-      roomIdEl.innerHTML = `ルームID：<span>${window.HRNet.getRoomId()}</span>`;
+
+    const playModeBadge = document.getElementById("play-mode-badge");
+    if (playModeBadge) playModeBadge.textContent = "オンライン対戦モード";
+    const colorModeBadge = document.getElementById("color-mode-badge");
+    if (colorModeBadge) colorModeBadge.textContent = cfg.colorMode === "five" ? "5色モード" : "4色モード";
+    const diagonalBadge = document.getElementById("diagonal-mode-badge");
+    if (diagonalBadge) diagonalBadge.style.display = cfg.settings && cfg.settings.diagonals ? "" : "none";
+    const roomIdBadge = document.getElementById("room-id-badge");
+    if (roomIdBadge && window.HRNet && window.HRNet.getRoomId()) {
+      roomIdBadge.textContent = `ルームID: ${window.HRNet.getRoomId()}`;
+      roomIdBadge.classList.remove("hidden");
     }
 
     renderBoard();
@@ -1038,6 +1115,16 @@
       window.HRNet.on("peer-disconnected", (peerId) => {
         if (window.__HR_ONLINE_ACTIVE) showDisconnectBanner(peerId);
       });
+      window.HRNet.on("peer-list-changed", () => {
+        // 対局中に誰かが切断／復帰した時、HUDと（表示中なら）準備確認の
+        // オーバーレイの表示をその場で最新の接続状況に合わせて更新する
+        if (!window.__HR_ONLINE_ACTIVE || !mp) return;
+        renderHud();
+        const overlay = document.getElementById("next-ready-overlay");
+        if (overlay && !overlay.classList.contains("hidden")) {
+          renderNextReadyPlayerList();
+        }
+      });
     }
 
     if (mp.isHost) {
@@ -1051,6 +1138,34 @@
     if (mp) {
       stopCountdown();
       mp = null;
+    }
+  };
+
+  // 切断していたプレイヤーが（新しいpeerIdで）復帰した時、online.js側で
+  // 「本人の再接続」だと判定できたら呼ばれる。得点などpeerId紐づけの
+  // 状態を、古いIDから新しいIDへ引き継ぐ。
+  window.remapOnlinePlayerId = function (oldPeerId, newPeerId) {
+    if (!mp || oldPeerId === newPeerId) return;
+    if (mp.scores[oldPeerId] !== undefined) {
+      mp.scores[newPeerId] = mp.scores[oldPeerId];
+      delete mp.scores[oldPeerId];
+    }
+    const player = mp.players.find((p) => p.peerId === oldPeerId);
+    if (player) player.peerId = newPeerId;
+    if (mp.bestDeclare && mp.bestDeclare.peerId === oldPeerId) {
+      mp.bestDeclare.peerId = newPeerId;
+    }
+    if (mp.giveUpVoters.has(oldPeerId)) {
+      mp.giveUpVoters.delete(oldPeerId);
+      mp.giveUpVoters.add(newPeerId);
+    }
+    if (mp.readyForNext.has(oldPeerId)) {
+      mp.readyForNext.delete(oldPeerId);
+      mp.readyForNext.add(newPeerId);
+    }
+    if (window.__HR_ONLINE_ACTIVE) {
+      renderHud();
+      renderRaceStatus();
     }
   };
 

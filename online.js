@@ -70,6 +70,7 @@
           joinOrder: 0,
           name: hostProfile.name,
           profile: hostProfile,
+          clientId: window.HRNet.getMyClientId(),
           ready: false,
           connected: true,
           isCpu: false,
@@ -229,7 +230,8 @@
       msg.type === "round-result" ||
       msg.type === "round-invalid" ||
       msg.type === "verify-request" ||
-      msg.type === "giveup-start" ||
+      msg.type === "giveup-vote" ||
+      msg.type === "giveup-concede-tally" ||
       msg.type === "giveup-countdown-start" ||
       msg.type === "giveup-cancelled" ||
       msg.type === "giveup-reveal" ||
@@ -381,6 +383,19 @@
 
   // ================= 切断・ホスト引き継ぎへの対応 =================
 
+  function mergeGhostInto(target, oldPeerId) {
+    // 待機タイマーは切断時点の（古い）peerIdで登録されているので、
+    // そちらを使って止める（新しいpeerIdでは見つからず残り続けてしまう）
+    if (waitTimers[oldPeerId]) {
+      clearInterval(waitTimers[oldPeerId]);
+      delete waitTimers[oldPeerId];
+    }
+    target.isCpu = false;
+    if (typeof window.remapOnlinePlayerId === "function") {
+      window.remapOnlinePlayerId(oldPeerId, target.peerId);
+    }
+  }
+
   function onPeerListChanged(peerList) {
     if (!room) return;
     peerList.forEach((netP) => {
@@ -388,19 +403,56 @@
       if (p) {
         const wasConnected = p.connected;
         p.connected = netP.connected;
+        // プロフィール（名前・アイコン）が後から届いた場合（"hello"メッセージ経由）は反映する
+        if (netP.profile && netP.profile.name) {
+          p.profile = netP.profile;
+          p.name = netP.profile.name;
+        }
+        if (netP.clientId && !p.clientId) {
+          p.clientId = netP.clientId;
+          // clientIdが後から分かった時点で、同じclientIdを持つ「切断中」の
+          // 別エントリ（＝先に接続イベントだけ処理されて出来た別人扱いの
+          // ゴースト）が無いか確認し、あれば統合する。
+          const ghost = room.players.find((pl) => pl !== p && pl.clientId === netP.clientId && !pl.connected);
+          if (ghost) {
+            const oldPeerId = ghost.peerId;
+            room.players = room.players.filter((pl) => pl !== ghost);
+            mergeGhostInto(p, oldPeerId);
+          }
+        }
         if (wasConnected && !p.connected) onPlayerDisconnected(p);
         if (!wasConnected && p.connected) onPlayerReconnected(p);
       } else if (netP.connected) {
-        room.players.push({
-          peerId: netP.peerId,
-          joinOrder: netP.joinOrder,
-          name: (netP.profile && netP.profile.name) || defaultPlayerName(netP.joinOrder),
-          profile: netP.profile,
-          ready: false,
-          connected: true,
-          isCpu: false,
-        });
-        room.players.sort((a, b) => a.joinOrder - b.joinOrder);
+        // 同じ clientId を持つ「切断中」のプレイヤーがいれば、新規参加では
+        // なく本人の再接続として扱う（PeerJSは参加のたびに新しいpeerIdを
+        // 振るため、clientIdで見分けないと毎回「別人」に見えてしまう）
+        const ghost = netP.clientId
+          ? room.players.find((pl) => pl.clientId && pl.clientId === netP.clientId && !pl.connected)
+          : null;
+        if (ghost) {
+          const oldPeerId = ghost.peerId;
+          ghost.peerId = netP.peerId;
+          ghost.connected = true;
+          ghost.joinOrder = netP.joinOrder;
+          if (netP.profile && netP.profile.name) {
+            ghost.profile = netP.profile;
+            ghost.name = netP.profile.name;
+          }
+          room.players.sort((a, b) => a.joinOrder - b.joinOrder);
+          mergeGhostInto(ghost, oldPeerId);
+        } else {
+          room.players.push({
+            peerId: netP.peerId,
+            joinOrder: netP.joinOrder,
+            name: (netP.profile && netP.profile.name) || defaultPlayerName(netP.joinOrder),
+            profile: netP.profile,
+            clientId: netP.clientId || null,
+            ready: false,
+            connected: true,
+            isCpu: false,
+          });
+          room.players.sort((a, b) => a.joinOrder - b.joinOrder);
+        }
       }
     });
     if (iAmHost) broadcastRoomState();
@@ -446,7 +498,14 @@
     }
   }
 
+  let networkEventsWired = false;
   function wireNetworkEvents() {
+    // HRNet はページ読み込み中ずっと生き続ける単一のオブジェクトなので、
+    // ルームの作成・参加のたびに呼んでも重複登録しないようにする
+    // （そうしないと、退室→再参加を繰り返すたびにイベントハンドラが
+    // 積み重なり、メッセージが何重にも処理されて再接続がおかしくなる）。
+    if (networkEventsWired) return;
+    networkEventsWired = true;
     window.HRNet.on("app-message", (m) => handleAppMessage(m.from, m.payload));
     window.HRNet.on("peer-list-changed", onPeerListChanged);
     window.HRNet.on("host-changed", onHostChanged);

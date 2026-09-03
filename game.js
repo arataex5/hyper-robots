@@ -746,6 +746,10 @@
     if (onlineHud) onlineHud.classList.add("hidden");
     const newMapBtn = document.getElementById("btn-new-map");
     if (newMapBtn) newMapBtn.classList.remove("hidden");
+    const playModeBadge = document.getElementById("play-mode-badge");
+    if (playModeBadge) playModeBadge.textContent = "一人用モード";
+    const roomIdBadge = document.getElementById("room-id-badge");
+    if (roomIdBadge) roomIdBadge.classList.add("hidden");
 
     ACTIVE_COLORS = mode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
     USE_DIAGONALS = !!useDiagonals;

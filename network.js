@@ -89,14 +89,31 @@
 
   // ================= PeerJS を使った実際の通信部分 =================
 
+  // 参加のたびに変わってしまう PeerJS の peerId とは別に、「同じ人」を
+  // 見分けるための安定した ID。sessionStorage に保存しておくことで、
+  // ページを再読み込みしても（同じタブなら）同じ ID のままになる。
+  function getOrCreateClientId() {
+    try {
+      let id = window.sessionStorage.getItem("hr-client-id");
+      if (!id) {
+        id = "c-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        window.sessionStorage.setItem("hr-client-id", id);
+      }
+      return id;
+    } catch (e) {
+      return "c-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+  }
+
   function createNetwork() {
     const emitter = createEmitter();
+    const myClientId = getOrCreateClientId();
     let peer = null;
     let myPeerId = null;
     let myJoinOrder = 0;
     let roomId = null;
     let hostPeerId = null; // 現在のホストの peerId
-    // peers: peerId -> { peerId, profile, joinOrder, connected, conn(DataConnection|null), isCpu }
+    // peers: peerId -> { peerId, profile, joinOrder, connected, conn(DataConnection|null), isCpu, clientId }
     const peers = new Map();
 
     function peerListArray() {
@@ -106,6 +123,7 @@
         joinOrder: p.joinOrder,
         connected: p.connected,
         isCpu: !!p.isCpu,
+        clientId: p.clientId || null,
       }));
     }
 
@@ -184,6 +202,13 @@
       } else if (msg.type === "app") {
         // ゲーム本体（online.js）向けのメッセージはそのまま上に流す
         emitter.emit("app-message", { from: fromPeerId, payload: msg.payload });
+      } else if (msg.type === "hello") {
+        // 参加者が自分のプロフィールを教えてくれた。記録して知らせる
+        // （これがないと、参加者のプロフィール名・アイコンが相手に一切伝わらない）
+        setPeerProfile(fromPeerId, msg.profile);
+        const p = peers.get(fromPeerId);
+        if (p) p.clientId = msg.clientId || null;
+        emitter.emit("peer-list-changed", peerListArray());
       }
     }
 
@@ -298,7 +323,7 @@
           // 新規参加者に、既存ピア一覧（自分含む）を送る
           const list = peerListArray()
             .filter((x) => x.peerId !== conn.peer)
-            .concat([{ peerId: myPeerId, profile: myProfile, joinOrder: 0, connected: true, isCpu: false }]);
+            .concat([{ peerId: myPeerId, profile: myProfile, joinOrder: 0, connected: true, isCpu: false, clientId: myClientId }]);
           conn.send(
             JSON.stringify({
               type: "welcome",
@@ -354,7 +379,7 @@
         wireConnection(conn);
         let settled = false;
         conn.on("open", () => {
-          conn.send(JSON.stringify({ type: "hello", profile: myProfile }));
+          conn.send(JSON.stringify({ type: "hello", profile: myProfile, clientId: myClientId }));
         });
         emitter.on("room-joined", function onJoined(info) {
           if (settled) return;
@@ -436,6 +461,7 @@
       getHostPeerId: () => hostPeerId,
       getPeerList: peerListArray,
       getMyJoinOrder: () => myJoinOrder,
+      getMyClientId: () => myClientId,
     };
   }
 
