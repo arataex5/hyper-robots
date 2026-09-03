@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>ハイパーロボット — 一人用モード</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="title-active">
+  <div id="title-screen" class="title-screen">
+    <div class="title-card">
+
+      <!-- ================= 画面1: メインメニュー ================= -->
+      <div class="title-screen-panel" id="screen-main-menu">
+        <div class="title-bots">
+          <span class="title-bot bot-red"></span>
+          <span class="title-bot bot-blue"></span>
+          <span class="title-bot bot-green"></span>
+          <span class="title-bot bot-yellow"></span>
+        </div>
+        <h1 class="title-heading"></h1>
+        <p class="title-subtitle"></p>
+        <p class="title-tagline"></p>
+        <ul class="title-points"></ul>
+        <div class="profile-summary" id="profile-summary">
+          <div class="profile-summary-avatar" id="profile-summary-avatar"></div>
+          <div class="profile-summary-info">
+            <span class="profile-summary-label">プレイヤー</span>
+            <span class="profile-summary-name" id="profile-summary-name"></span>
+          </div>
+          <button type="button" class="btn profile-edit-btn" id="profile-edit-btn">編集</button>
+        </div>
+        <div class="menu-mode-buttons">
+          <button type="button" class="btn btn-primary menu-mode-btn" id="btn-goto-solo">🎮 ソロモード</button>
+          <button type="button" class="btn btn-primary menu-mode-btn" id="btn-goto-online">🌐 オンライン対戦モード</button>
+        </div>
+      </div>
+
+      <!-- ================= 画面2: ソロモード設定 ================= -->
+      <div class="title-screen-panel hidden" id="screen-solo-settings">
+        <button type="button" class="btn back-btn" id="btn-solo-back">← もどる</button>
+        <h2 class="screen-heading">ソロモード設定</h2>
+        <div class="title-mode-select" role="group" aria-label="ロボットの色数">
+          <button type="button" class="mode-option selected" data-mode="four">4色モード</button>
+          <button type="button" class="mode-option" data-mode="five">5色モード</button>
+        </div>
+        <label class="title-diagonal-toggle">
+          <input type="checkbox" id="diagonal-toggle">
+          <span>斜め壁を追加する（上級者向け）</span>
+        </label>
+        <button class="title-start-btn btn btn-primary" id="btn-solo-start"></button>
+      </div>
+
+      <!-- ================= 画面3: オンライン対戦ロビー ================= -->
+      <div class="title-screen-panel hidden" id="screen-online-lobby">
+        <button type="button" class="btn back-btn" id="btn-online-back">← もどる</button>
+        <h2 class="screen-heading">オンライン対戦</h2>
+        <div class="profile-summary" id="profile-summary-online">
+          <div class="profile-summary-avatar" id="profile-summary-avatar-online"></div>
+          <div class="profile-summary-info">
+            <span class="profile-summary-label">プレイヤー</span>
+            <span class="profile-summary-name" id="profile-summary-name-online"></span>
+          </div>
+          <button type="button" class="btn profile-edit-btn" id="profile-edit-btn-online">編集</button>
+        </div>
+        <button type="button" class="btn btn-primary online-action-btn" id="btn-create-room">🏠 ルーム作成</button>
+        <div class="join-room-row">
+          <input type="text" id="join-room-id-input" maxlength="5" inputmode="numeric" placeholder="ルームID（5桁）">
+          <button type="button" class="btn btn-primary" id="btn-join-room">参加</button>
+        </div>
+        <p class="online-status-line" id="online-status-line"></p>
+      </div>
+
+      <!-- ================= 画面4: ルーム（ロビー内） ================= -->
+      <div class="title-screen-panel hidden" id="screen-room">
+        <button type="button" class="btn back-btn" id="btn-room-leave">← 退出</button>
+        <h2 class="room-name" id="room-name-display"></h2>
+        <div class="room-id-display">ルームID：<span id="room-id-display"></span></div>
+
+        <div class="room-settings" id="room-settings-panel">
+          <div class="room-setting-row">
+            <span class="room-setting-label">色数</span>
+            <div class="room-setting-options" id="room-setting-colormode">
+              <button type="button" class="mini-option selected" data-value="four">4色</button>
+              <button type="button" class="mini-option" data-value="five">5色</button>
+            </div>
+          </div>
+          <div class="room-setting-row">
+            <span class="room-setting-label">斜め壁</span>
+            <div class="room-setting-options" id="room-setting-diagonals">
+              <button type="button" class="mini-option selected" data-value="off">なし</button>
+              <button type="button" class="mini-option" data-value="on">あり</button>
+            </div>
+          </div>
+          <div class="room-setting-row">
+            <span class="room-setting-label">回答後の制限時間</span>
+            <div class="room-setting-options" id="room-setting-timelimit">
+              <button type="button" class="mini-option" data-value="30">30秒</button>
+              <button type="button" class="mini-option selected" data-value="60">60秒</button>
+              <button type="button" class="mini-option" data-value="90">90秒</button>
+              <button type="button" class="mini-option" data-value="120">120秒</button>
+              <button type="button" class="mini-option" data-value="180">180秒</button>
+              <button type="button" class="mini-option" data-value="300">300秒</button>
+            </div>
+          </div>
+          <div class="room-setting-row">
+            <span class="room-setting-label">最後まで続ける</span>
+            <div class="room-setting-options" id="room-setting-playuntilend">
+              <button type="button" class="mini-option selected" data-value="on">続ける</button>
+              <button type="button" class="mini-option" data-value="off">決着で終了</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="room-player-list" id="room-player-list"></div>
+
+        <div class="room-disconnect-controls hidden" id="room-disconnect-controls">
+          <p class="room-disconnect-label" id="room-disconnect-label"></p>
+          <button type="button" class="btn" id="btn-disconnect-mode-toggle"></button>
+        </div>
+
+        <div class="room-action-row">
+          <button type="button" class="btn btn-primary" id="btn-room-ready">準備完了</button>
+          <button type="button" class="btn btn-primary hidden" id="btn-room-start">ゲーム開始</button>
+        </div>
+        <p class="online-status-line" id="room-status-line"></p>
+      </div>
+
+    </div>
+  </div>
+
+
+  <div id="profile-editor-overlay" class="profile-editor-overlay hidden">
+    <div class="profile-editor-card">
+      <h2 class="profile-editor-heading">プロフィール設定</h2>
+      <label class="profile-name-label">
+        プレイヤー名（7文字まで）
+        <input type="text" id="profile-name-input" maxlength="7" placeholder="プレイヤー">
+      </label>
+      <div class="avatar-preview-large" id="avatar-preview-large"></div>
+      <div class="part-tabs" id="part-tabs">
+        <button type="button" class="part-tab selected" data-part="background">背景</button>
+        <button type="button" class="part-tab" data-part="head">頭</button>
+        <button type="button" class="part-tab" data-part="eyes">目</button>
+        <button type="button" class="part-tab" data-part="nose">鼻</button>
+        <button type="button" class="part-tab" data-part="mouth">口</button>
+        <button type="button" class="part-tab" data-part="ears">耳</button>
+        <button type="button" class="part-tab" data-part="accessory">アクセサリー</button>
+      </div>
+      <p class="part-editor-label" id="part-editor-label">背景</p>
+      <div class="color-swatch-row" id="color-swatch-row"></div>
+      <div class="shape-grid" id="shape-grid"></div>
+      <div class="profile-editor-actions">
+        <button type="button" class="btn" id="profile-cancel-btn">キャンセル</button>
+        <button type="button" class="btn btn-primary" id="profile-save-btn">保存して閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app">
+    <div id="clear-banner" class="clear-banner"></div>
+
+    <header class="topbar">
+      <h1 class="logo">ハイパーロボット</h1>
+      <div class="player-badge" id="player-badge">
+        <div class="player-badge-avatar" id="player-badge-avatar"></div>
+        <span id="player-badge-name"></span>
+      </div>
+      <span class="mode-badge">一人用モード</span>
+      <span class="mode-badge" id="color-mode-badge">4色モード</span>
+      <span class="mode-badge" id="diagonal-mode-badge" style="display:none;">斜め壁あり</span>
+      <span class="mode-badge" id="cleared-badge">クリア: 0</span>
+      <button id="btn-back-title" class="btn">🏠 タイトルへ戻る</button>
+      <button id="btn-new-map" class="btn">🔀 新しいマップ</button>
+    </header>
+
+    <section class="goal-panel">
+      <div class="goal-info">
+        <div class="goal-icon" id="goal-icon"></div>
+        <div class="goal-text">
+          <p class="goal-label">目標</p>
+          <p class="goal-desc" id="goal-desc">盤面を準備しています…</p>
+        </div>
+      </div>
+      <div class="stat-group">
+        <div class="stat">
+          <span class="stat-label">手数</span>
+          <span class="stat-value" id="move-count">0</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="controls" id="solo-controls">
+      <button id="btn-undo" class="btn" disabled>↶ 一個戻る</button>
+      <button id="btn-redo" class="btn" disabled>↷ 一個進む</button>
+      <button id="btn-reset" class="btn">⟲ リセット</button>
+      <button id="btn-check" class="btn btn-accent">答え合わせ</button>
+      <button id="btn-next" class="btn">次の問題へ →</button>
+    </section>
+
+    <section class="controls hidden" id="online-controls">
+      <button id="btn-online-undo" class="btn" disabled>↶ 一個戻る</button>
+      <button id="btn-online-redo" class="btn" disabled>↷ 一個進む</button>
+      <button id="btn-online-reset" class="btn">⟲ リセット</button>
+      <button id="btn-online-declare" class="btn btn-primary">📣 回答する</button>
+    </section>
+
+    <div class="online-hud hidden" id="online-hud">
+      <div class="online-hud-players" id="online-hud-players"></div>
+      <div class="online-hud-race" id="online-hud-race"></div>
+    </div>
+
+    <p class="status-line" id="status-line"></p>
+
+    <div class="board-wrap">
+      <div class="board" id="board"></div>
+    </div>
+
+    <details class="how-to">
+      <summary>遊び方・ルール</summary>
+      <div class="how-to-body">
+        <p><strong>移動のルール</strong><br>
+        ロボットは縦・横のまっすぐな方向にしか動けません。しかも、壁や他のロボットにぶつかるまで止まることができず、途中で曲がることもできません。ロボットをクリックすると選択され、進める方向に矢印が表示されます。矢印をクリックすると、止まる場所までスライドします。</p>
+        <p><strong>目標</strong><br>
+        盤面の上部に表示された色と形のマスへ、その色のロボットを最短手数で導きましょう。目標マスにロボットが到達すると、自動的にクリアと判定されます。他の色のロボットを壁代わりに使うこともできます。</p>
+        <p><strong>答え合わせ</strong><br>
+        コンピュータが裏で考えていた最短手順をロボットが実際に動きながら教えてくれます。まだ思いついていない場合は「しばらくお待ちください」と表示され、10秒たっても見つからない場合は「見つかりませんでした」と表示されます。</p>
+        <p><strong>次の問題へ</strong><br>
+        いつでも次の目標に進むことができます。ロボットの位置はそのまま引き継がれます。</p>
+        <p><strong>リセット</strong><br>
+        今の目標が現れた時点の位置まで、ロボットをまとめて戻します。手数もリセットされ、その場でやり直せます。</p>
+        <p><strong>斜め壁（任意設定）</strong><br>
+        タイトル画面で「斜め壁を追加する」を選ぶと、盤面のところどころに色つきの斜めの壁が現れます。自分と同じ色の斜め壁はすり抜けられますが、違う色の斜め壁にぶつかると、その場で90度向きが変わってそのまま直進します（曲がるところまでで1手です）。</p>
+      </div>
+    </details>
+  </div>
+
+  <script src="boards.js"></script>
+  <script src="engine.js"></script>
+  <script src="game.js"></script>
+  <script src="profile.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="network.js"></script>
+  <script src="online.js"></script>
+  <script src="multiplayer.js"></script>
+  <script src="title.js"></script>
+</body>
+</html>

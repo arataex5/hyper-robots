@@ -1,0 +1,451 @@
+/*
+ * network.js — オンライン対戦のための P2P 通信レイヤー
+ * ------------------------------------------------------------
+ * PeerJS（WebRTC）を使い、サーバーを持たない静的サイト（GitHub Pages
+ * などでの公開を想定）のままリアルタイム対戦を実現します。
+ *
+ * 設計方針:
+ *   ・ルームは「フルメッシュ」構成（全員が全員と直接つながる）にする。
+ *     こうしておくと、ホストが切断しても残りの全員が既に互いに繋がって
+ *     いるため、新しい接続をやり直さずにホストだけを引き継げる。
+ *   ・「誰が新ホストになるか」は、切断後も全員が同じ結論に達せるよう、
+ *     参加順（joinOrder）が一番小さい生存者、という決め方にする
+ *     （通信をやり取りしなくても各自で計算できる＝合意がいらない）。
+ *   ・新しい接続を開始するのは常に「参加順が新しい方」というルールに
+ *     しておくことで、二重に接続してしまうのを防いでいる。
+ *
+ * このファイルの前半（PURE LOGIC セクション）は実際のネットワーク通信を
+ * 一切使わない純粋関数群で、ユニットテストで検証済み。後半は PeerJS の
+ * 実際のAPIをラップする部分で、本物の2つのブラウザタブ間の通信でしか
+ * 最終確認ができないため、公開後に実機でのテストをおすすめします。
+ */
+
+(function () {
+  "use strict";
+
+  const PEER_NAMESPACE = "hyperrobots5-";
+  const ROOM_ID_LENGTH = 5;
+
+  // ================= PURE LOGIC（ネットワークを使わない純粋関数） =================
+
+  function generateRoomId() {
+    let id = "";
+    for (let i = 0; i < ROOM_ID_LENGTH; i++) id += String(Math.floor(Math.random() * 10));
+    return id;
+  }
+
+  function roomIdToPeerId(roomId) {
+    return PEER_NAMESPACE + roomId;
+  }
+
+  function peerIdToRoomId(peerId) {
+    return peerId.startsWith(PEER_NAMESPACE) ? peerId.slice(PEER_NAMESPACE.length) : peerId;
+  }
+
+  function isValidRoomId(roomId) {
+    return /^[0-9]{5}$/.test(String(roomId || "").trim());
+  }
+
+  // 生存しているピアの中から、参加順(joinOrder)が最小の人を新ホストとして選ぶ。
+  // peers: [{ peerId, joinOrder, connected }] 全員が同じ入力を見れば同じ答えになる。
+  function electHost(peers) {
+    const alive = peers.filter((p) => p.connected);
+    if (alive.length === 0) return null;
+    return alive.reduce((best, p) => (p.joinOrder < best.joinOrder ? p : best), alive[0]).peerId;
+  }
+
+  // 新しいピアが増えたとき、「自分から接続しにいくべきか」を決める。
+  // ルール: 参加順が新しい方（joinOrderが大きい方）が、古い方に接続しにいく。
+  // これにより双方から同時に接続を試みて衝突するのを防ぐ。
+  function shouldInitiateConnection(myJoinOrder, otherJoinOrder) {
+    return myJoinOrder > otherJoinOrder;
+  }
+
+  // ================= イベントエミッタ（最小限の自作） =================
+
+  function createEmitter() {
+    const handlers = {};
+    return {
+      on(event, fn) {
+        (handlers[event] = handlers[event] || []).push(fn);
+      },
+      off(event, fn) {
+        if (!handlers[event]) return;
+        handlers[event] = handlers[event].filter((h) => h !== fn);
+      },
+      emit(event, payload) {
+        (handlers[event] || []).forEach((fn) => {
+          try {
+            fn(payload);
+          } catch (e) {
+            // 1つのハンドラの例外で他のハンドラや通信処理を止めない
+            // eslint-disable-next-line no-console
+            console.error("[network] handler error for", event, e);
+          }
+        });
+      },
+    };
+  }
+
+  // ================= PeerJS を使った実際の通信部分 =================
+
+  function createNetwork() {
+    const emitter = createEmitter();
+    let peer = null;
+    let myPeerId = null;
+    let myJoinOrder = 0;
+    let roomId = null;
+    let hostPeerId = null; // 現在のホストの peerId
+    // peers: peerId -> { peerId, profile, joinOrder, connected, conn(DataConnection|null), isCpu }
+    const peers = new Map();
+
+    function peerListArray() {
+      return Array.from(peers.values()).map((p) => ({
+        peerId: p.peerId,
+        profile: p.profile,
+        joinOrder: p.joinOrder,
+        connected: p.connected,
+        isCpu: !!p.isCpu,
+      }));
+    }
+
+    function isHost() {
+      return myPeerId === hostPeerId;
+    }
+
+    function broadcast(message, excludePeerId) {
+      const json = JSON.stringify(message);
+      peers.forEach((p) => {
+        if (p.peerId === myPeerId) return;
+        if (excludePeerId && p.peerId === excludePeerId) return;
+        if (p.conn && p.conn.open) {
+          try {
+            p.conn.send(json);
+          } catch (e) {
+            // 送信失敗は次のハートビート/切断検知に任せる
+          }
+        }
+      });
+    }
+
+    function sendTo(peerId, message) {
+      const p = peers.get(peerId);
+      if (p && p.conn && p.conn.open) {
+        p.conn.send(JSON.stringify(message));
+      }
+    }
+
+    function handleIncomingData(fromPeerId, raw) {
+      let msg;
+      try {
+        msg = JSON.parse(raw);
+      } catch (e) {
+        return;
+      }
+      emitter.emit("message", { from: fromPeerId, message: msg });
+
+      if (msg.type === "welcome") {
+        // 参加直後：ホストから初期ピア一覧をもらう
+        myJoinOrder = msg.you.joinOrder;
+        hostPeerId = msg.hostPeerId;
+        msg.peerList.forEach((p) => {
+          if (p.peerId === myPeerId) return;
+          if (!peers.has(p.peerId)) {
+            peers.set(p.peerId, { ...p, conn: null });
+          } else {
+            Object.assign(peers.get(p.peerId), p);
+          }
+        });
+        // 自分より参加順が古い相手には自分から接続しにいく
+        peers.forEach((p) => {
+          if (p.peerId === fromPeerId) return; // ホストとは接続済み
+          if (shouldInitiateConnection(myJoinOrder, p.joinOrder)) {
+            connectTo(p.peerId);
+          }
+        });
+        emitter.emit("room-joined", { peerList: peerListArray(), hostPeerId });
+      } else if (msg.type === "peer-joined") {
+        const p = msg.peer;
+        if (p.peerId === myPeerId) return;
+        if (!peers.has(p.peerId)) peers.set(p.peerId, { ...p, conn: null });
+        else Object.assign(peers.get(p.peerId), p);
+        if (shouldInitiateConnection(myJoinOrder, p.joinOrder)) {
+          connectTo(p.peerId);
+        }
+        emitter.emit("peer-list-changed", peerListArray());
+      } else if (msg.type === "peer-left") {
+        const p = peers.get(msg.peerId);
+        if (p) p.connected = false;
+        emitter.emit("peer-list-changed", peerListArray());
+        maybeMigrateHost();
+      } else if (msg.type === "host-migrated") {
+        hostPeerId = msg.newHostPeerId;
+        emitter.emit("host-changed", hostPeerId);
+      } else if (msg.type === "app") {
+        // ゲーム本体（online.js）向けのメッセージはそのまま上に流す
+        emitter.emit("app-message", { from: fromPeerId, payload: msg.payload });
+      }
+    }
+
+    function maybeMigrateHost() {
+      if (hostPeerId && peers.has(hostPeerId) && peers.get(hostPeerId).connected) return;
+      // 自分自身も候補に含めて計算する
+      const all = peerListArray().concat([
+        { peerId: myPeerId, joinOrder: myJoinOrder, connected: true },
+      ]);
+      const newHost = electHost(all);
+      if (newHost && newHost !== hostPeerId) {
+        hostPeerId = newHost;
+        emitter.emit("host-changed", hostPeerId);
+        if (isHost()) {
+          // 新ホストは全員に通知する
+          broadcast({ type: "host-migrated", newHostPeerId: hostPeerId });
+        }
+      }
+    }
+
+    function wireConnection(conn, remoteJoinOrder, remoteProfile) {
+      conn.on("open", () => {
+        const existing = peers.get(conn.peer);
+        if (existing) {
+          existing.conn = conn;
+          existing.connected = true;
+          existing.connecting = false;
+        } else {
+          peers.set(conn.peer, {
+            peerId: conn.peer,
+            profile: remoteProfile || null,
+            joinOrder: remoteJoinOrder != null ? remoteJoinOrder : 9999,
+            connected: true,
+            conn,
+            isCpu: false,
+            connecting: false,
+          });
+        }
+        emitter.emit("peer-connected", conn.peer);
+        emitter.emit("peer-list-changed", peerListArray());
+      });
+      conn.on("data", (raw) => handleIncomingData(conn.peer, raw));
+      conn.on("close", () => {
+        const p = peers.get(conn.peer);
+        if (p) p.connected = false;
+        emitter.emit("peer-disconnected", conn.peer);
+        emitter.emit("peer-list-changed", peerListArray());
+        if (isHost()) {
+          broadcast({ type: "peer-left", peerId: conn.peer });
+        }
+        maybeMigrateHost();
+      });
+      conn.on("error", () => {
+        const p = peers.get(conn.peer);
+        if (p) p.connected = false;
+        emitter.emit("peer-disconnected", conn.peer);
+        emitter.emit("peer-list-changed", peerListArray());
+        maybeMigrateHost();
+      });
+    }
+
+    function connectTo(remotePeerId) {
+      if (!peer || remotePeerId === myPeerId) return;
+      const existing = peers.get(remotePeerId);
+      // 既に開通済み、または接続処理中なら二重に接続しにいかない
+      if (existing && (existing.connecting || (existing.conn && existing.conn.open))) return;
+      if (existing) existing.connecting = true;
+      else {
+        peers.set(remotePeerId, {
+          peerId: remotePeerId, profile: null, joinOrder: 9999,
+          connected: false, conn: null, isCpu: false, connecting: true,
+        });
+      }
+      const conn = peer.connect(remotePeerId, { reliable: true });
+      wireConnection(conn);
+    }
+
+    function createPeerWithRetry(desiredId, attemptsLeft) {
+      return new Promise((resolve, reject) => {
+        const p = new window.Peer(desiredId);
+        p.on("open", (id) => resolve(p));
+        p.on("error", (err) => {
+          if (err && err.type === "unavailable-id" && attemptsLeft > 0) {
+            p.destroy();
+            resolve(createPeerWithRetry(roomIdToPeerId(generateRoomId()), attemptsLeft - 1));
+          } else {
+            reject(err);
+          }
+        });
+      });
+    }
+
+    async function hostRoom(myProfile) {
+      const newRoomId = generateRoomId();
+      const desiredPeerId = roomIdToPeerId(newRoomId);
+      peer = await createPeerWithRetry(desiredPeerId, 5);
+      myPeerId = peer.id;
+      roomId = peerIdToRoomId(myPeerId);
+      hostPeerId = myPeerId;
+      myJoinOrder = 0;
+
+      peer.on("connection", (conn) => {
+        const joinOrder = peers.size + 1;
+        // wireConnection が自前で conn.on("open", ...) を登録するので、
+        // 「open」がまだ発火していないこのタイミング（connectionイベント
+        // ハンドラの同期処理内）で呼ぶ必要がある。open発火後にネストして
+        // 呼ぶと、その回のopenイベントを取りこぼしてしまう。
+        wireConnection(conn, joinOrder, null);
+        conn.on("open", () => {
+          const p = peers.get(conn.peer);
+          if (p) p.joinOrder = joinOrder;
+          // 新規参加者に、既存ピア一覧（自分含む）を送る
+          const list = peerListArray()
+            .filter((x) => x.peerId !== conn.peer)
+            .concat([{ peerId: myPeerId, profile: myProfile, joinOrder: 0, connected: true, isCpu: false }]);
+          conn.send(
+            JSON.stringify({
+              type: "welcome",
+              hostPeerId: myPeerId,
+              peerList: list,
+              you: { joinOrder },
+            })
+          );
+          // 既存メンバーに新規参加を告知（各自が必要なら接続しにいく）
+          broadcast({ type: "peer-joined", peer: { peerId: conn.peer, profile: null, joinOrder, connected: true } }, conn.peer);
+          emitter.emit("peer-list-changed", peerListArray());
+        });
+      });
+
+      peer.on("disconnected", () => {
+        emitter.emit("broker-disconnected");
+      });
+
+      emitter.emit("room-created", { roomId, peerId: myPeerId });
+      return { roomId, peerId: myPeerId };
+    }
+
+    async function joinRoom(inputRoomId, myProfile) {
+      if (!isValidRoomId(inputRoomId)) {
+        throw new Error("ルームIDは5桁の数字で入力してください。");
+      }
+      const targetPeerId = roomIdToPeerId(inputRoomId);
+      peer = await createPeerWithRetry(null, 0).catch(() => {
+        return new Promise((resolve, reject) => {
+          const p = new window.Peer();
+          p.on("open", () => resolve(p));
+          p.on("error", reject);
+        });
+      });
+      myPeerId = peer.id;
+      roomId = inputRoomId;
+
+      // メッシュ構成のため、自分より参加順が新しい他メンバーからの直接
+      // 接続も受け付けられるようにしておく（ホスト宛の特別な処理は不要で、
+      // 単に配線するだけでよい）。
+      peer.on("connection", (conn) => {
+        wireConnection(conn);
+      });
+
+      return new Promise((resolve, reject) => {
+        const conn = peer.connect(targetPeerId, { reliable: true, metadata: { profile: myProfile } });
+        // hostRoom() 側と同じ理由で、wireConnection は open がまだ発火して
+        // いない今のタイミング（connect() 呼び出し直後の同期処理）で呼ぶ。
+        // データの受信処理は wireConnection が内部で一度だけ登録するので、
+        // ここで別に conn.on("data", ...) を重ねて登録しない
+        // （二重登録すると同じメッセージが2回処理されてしまう）。
+        // 「welcome」を受け取れたかどうかは emitter の room-joined イベントで見る。
+        wireConnection(conn);
+        let settled = false;
+        conn.on("open", () => {
+          conn.send(JSON.stringify({ type: "hello", profile: myProfile }));
+        });
+        emitter.on("room-joined", function onJoined(info) {
+          if (settled) return;
+          settled = true;
+          emitter.off("room-joined", onJoined);
+          hostPeerId = info.hostPeerId;
+          resolve({ roomId, peerId: myPeerId, hostPeerId });
+        });
+        conn.on("error", (err) => {
+          if (!settled) {
+            settled = true;
+            reject(new Error("ルームに接続できませんでした。ルームIDを確認してください。"));
+          }
+        });
+        peer.on("error", (err) => {
+          if (!settled && err && err.type === "peer-unavailable") {
+            settled = true;
+            reject(new Error("そのルームIDは見つかりませんでした。"));
+          }
+        });
+      });
+    }
+
+    function leaveRoom() {
+      peers.forEach((p) => {
+        if (p.conn) {
+          try {
+            p.conn.close();
+          } catch (e) {
+            // noop
+          }
+        }
+      });
+      peers.clear();
+      if (peer) {
+        try {
+          peer.destroy();
+        } catch (e) {
+          // noop
+        }
+      }
+      peer = null;
+      myPeerId = null;
+      hostPeerId = null;
+      roomId = null;
+    }
+
+    function sendApp(payload) {
+      broadcast({ type: "app", payload });
+    }
+
+    function sendAppTo(peerId, payload) {
+      sendTo(peerId, { type: "app", payload });
+    }
+
+    function setPeerProfile(peerId, profile) {
+      const p = peers.get(peerId);
+      if (p) p.profile = profile;
+    }
+
+    function setPeerCpu(peerId, isCpu) {
+      const p = peers.get(peerId);
+      if (p) p.isCpu = isCpu;
+    }
+
+    return {
+      on: emitter.on,
+      off: emitter.off,
+      hostRoom,
+      joinRoom,
+      leaveRoom,
+      broadcastApp: sendApp,
+      sendAppTo,
+      setPeerProfile,
+      setPeerCpu,
+      isHost,
+      getMyPeerId: () => myPeerId,
+      getRoomId: () => roomId,
+      getHostPeerId: () => hostPeerId,
+      getPeerList: peerListArray,
+      getMyJoinOrder: () => myJoinOrder,
+    };
+  }
+
+  window.HRNetInternal = {
+    generateRoomId,
+    roomIdToPeerId,
+    peerIdToRoomId,
+    isValidRoomId,
+    electHost,
+    shouldInitiateConnection,
+  };
+  window.HRNet = createNetwork();
+})();
