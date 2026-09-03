@@ -195,14 +195,14 @@
     const readyBtn = el("btn-room-ready");
     const startBtn = el("btn-room-start");
     const me = findPlayer(myPeerId);
-    if (readyBtn && me) {
-      readyBtn.textContent = me.ready ? "準備解除" : "準備完了";
+    if (readyBtn) {
+      // ホストは準備完了ボタンを押す必要がない（対戦相手ではなく進行役なので）
+      readyBtn.classList.toggle("hidden", iAmHost);
+      if (me && !iAmHost) readyBtn.textContent = me.ready ? "準備解除" : "準備完了";
     }
     if (startBtn) {
-      const others = room.players.filter((p) => p.peerId !== room.hostPeerId);
-      const everyoneElseReady = others.length > 0 && others.every((p) => p.ready);
       startBtn.classList.toggle("hidden", !iAmHost);
-      startBtn.disabled = !(iAmHost && everyoneElseReady);
+      startBtn.disabled = !(iAmHost && allNonHostReady());
     }
   }
 
@@ -227,7 +227,10 @@
       msg.type === "declare-update" ||
       msg.type === "round-result" ||
       msg.type === "round-invalid" ||
-      msg.type === "verify-request"
+      msg.type === "verify-request" ||
+      msg.type === "giveup-vote" ||
+      msg.type === "giveup-tally" ||
+      msg.type === "giveup-reveal"
     ) {
       handleGameMessage(msg);
     } else if (msg.type === "verify-submit" && iAmHost) {
@@ -313,8 +316,18 @@
     broadcastRoomState();
   }
 
+  function allNonHostReady() {
+    if (!room) return false;
+    const others = room.players.filter((p) => p.peerId !== room.hostPeerId && p.connected && !p.isCpu);
+    return others.length > 0 && others.every((p) => p.ready);
+  }
+
   function startGameFromRoom() {
     if (!room || !iAmHost) return;
+    if (!allNonHostReady()) {
+      setRoomStatus("全員が準備完了するまでゲームを開始できません。");
+      return;
+    }
     const colors = room.settings.colorMode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
     const board = window.generateBoard({ useDiagonals: room.settings.diagonals, colors });
     const targetQueue = shuffleArray(board.targets);
@@ -513,6 +526,7 @@
     leaveRoom,
     setLobbyStatus,
     setRoomStatus,
+    serializeBoard,
     // テスト・デバッグ用に内部状態を覗けるようにしておく
     _getRoom: () => room,
     _isHost: () => iAmHost,

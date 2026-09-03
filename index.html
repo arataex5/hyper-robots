@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
-<title>ハイパーロボット — 一人用モード</title>
+<title>ハイパーロボット</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="title-active">
@@ -22,14 +22,6 @@
         <p class="title-subtitle"></p>
         <p class="title-tagline"></p>
         <ul class="title-points"></ul>
-        <div class="profile-summary" id="profile-summary">
-          <div class="profile-summary-avatar" id="profile-summary-avatar"></div>
-          <div class="profile-summary-info">
-            <span class="profile-summary-label">プレイヤー</span>
-            <span class="profile-summary-name" id="profile-summary-name"></span>
-          </div>
-          <button type="button" class="btn profile-edit-btn" id="profile-edit-btn">編集</button>
-        </div>
         <div class="menu-mode-buttons">
           <button type="button" class="btn btn-primary menu-mode-btn" id="btn-goto-solo">🎮 ソロモード</button>
           <button type="button" class="btn btn-primary menu-mode-btn" id="btn-goto-online">🌐 オンライン対戦モード</button>
@@ -79,21 +71,30 @@
 
         <div class="room-settings" id="room-settings-panel">
           <div class="room-setting-row">
-            <span class="room-setting-label">色数</span>
+            <div class="room-setting-label-row">
+              <span class="room-setting-label">色数</span>
+              <span class="setting-help" tabindex="0" data-tooltip="4色または5色のロボットで対戦します。5色では壁代わりに使える黒ロボットが増えますが、黒専用のゴールはありません。">？</span>
+            </div>
             <div class="room-setting-options" id="room-setting-colormode">
               <button type="button" class="mini-option selected" data-value="four">4色</button>
               <button type="button" class="mini-option" data-value="five">5色</button>
             </div>
           </div>
           <div class="room-setting-row">
-            <span class="room-setting-label">斜め壁</span>
+            <div class="room-setting-label-row">
+              <span class="room-setting-label">斜め壁</span>
+              <span class="setting-help" tabindex="0" data-tooltip="盤面に色つきの斜めの壁を追加します。自分と同じ色の斜め壁はすり抜けられますが、違う色にぶつかるとその場で90度向きが変わります。">？</span>
+            </div>
             <div class="room-setting-options" id="room-setting-diagonals">
               <button type="button" class="mini-option selected" data-value="off">なし</button>
               <button type="button" class="mini-option" data-value="on">あり</button>
             </div>
           </div>
           <div class="room-setting-row">
-            <span class="room-setting-label">回答後の制限時間</span>
+            <div class="room-setting-label-row">
+              <span class="room-setting-label">回答後の制限時間</span>
+              <span class="setting-help" tabindex="0" data-tooltip="誰かが手数を宣言してから、他の人がそれより少ない手数で宣言し直せる時間です。時間切れになると、その時点で一番少ない手数を宣言した人の手順を確認します。">？</span>
+            </div>
             <div class="room-setting-options" id="room-setting-timelimit">
               <button type="button" class="mini-option" data-value="30">30秒</button>
               <button type="button" class="mini-option selected" data-value="60">60秒</button>
@@ -104,7 +105,10 @@
             </div>
           </div>
           <div class="room-setting-row">
-            <span class="room-setting-label">最後まで続ける</span>
+            <div class="room-setting-label-row">
+              <span class="room-setting-label">最後まで続ける</span>
+              <span class="setting-help" tabindex="0" data-tooltip="得点差が残りのお題数を上回り、順位が逆転できなくなった時点で対戦を自動終了するかどうかの設定です。「続ける」を選ぶと決着後も最後まで対戦を続けます。">？</span>
+            </div>
             <div class="room-setting-options" id="room-setting-playuntilend">
               <button type="button" class="mini-option selected" data-value="on">続ける</button>
               <button type="button" class="mini-option" data-value="off">決着で終了</button>
@@ -159,6 +163,7 @@
 
   <div class="app">
     <div id="clear-banner" class="clear-banner"></div>
+    <div id="disconnect-banner" class="clear-banner disconnect-banner"></div>
 
     <header class="topbar">
       <h1 class="logo">ハイパーロボット</h1>
@@ -203,11 +208,13 @@
       <button id="btn-online-redo" class="btn" disabled>↷ 一個進む</button>
       <button id="btn-online-reset" class="btn">⟲ リセット</button>
       <button id="btn-online-declare" class="btn btn-primary">📣 回答する</button>
+      <button id="btn-online-giveup" class="btn btn-accent">🏳️ 答えが知りたい！（ギブアップ）</button>
     </section>
 
     <div class="online-hud hidden" id="online-hud">
       <div class="online-hud-players" id="online-hud-players"></div>
       <div class="online-hud-race" id="online-hud-race"></div>
+      <div class="online-hud-giveup" id="online-hud-giveup"></div>
     </div>
 
     <p class="status-line" id="status-line"></p>

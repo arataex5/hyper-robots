@@ -656,6 +656,7 @@
 
   // ---------- wire up buttons ----------
   btnNewMap.addEventListener("click", () => {
+    if (window.__HR_ONLINE_ACTIVE) return; // オンライン対戦中はこのハンドラを無効化する（multiplayer.js側で処理）
     if (locked) return;
     newMap();
   });
@@ -665,6 +666,22 @@
       if (overlay) {
         overlay.classList.remove("hidden");
         document.body.classList.add("title-active");
+      }
+      // オンライン対戦中にタイトルへ戻る場合は、ルームからきちんと退出しておく
+      if (window.__HR_ONLINE_ACTIVE) {
+        window.__HR_ONLINE_ACTIVE = false;
+        if (typeof window.stopOnlineGame === "function") window.stopOnlineGame();
+        if (typeof window.HROnline === "object" && typeof window.HROnline.leaveRoom === "function") {
+          window.HROnline.leaveRoom();
+        }
+        const onlineControls = document.getElementById("online-controls");
+        const onlineHud = document.getElementById("online-hud");
+        const soloControls = document.getElementById("solo-controls");
+        if (onlineControls) onlineControls.classList.add("hidden");
+        if (onlineHud) onlineHud.classList.add("hidden");
+        if (soloControls) soloControls.classList.remove("hidden");
+        const newMapBtn = document.getElementById("btn-new-map");
+        if (newMapBtn) newMapBtn.classList.remove("hidden");
       }
       window.dispatchEvent(new CustomEvent("hr-return-to-title"));
     });
@@ -683,6 +700,19 @@
   // mode: "four"（デフォルト）または "five"（黒ロボットを追加）
   // useDiagonals: true の場合、斜め壁（任意設定）を有効にする
   window.startHyperRobotsGame = function (mode, useDiagonals) {
+    // オンライン対戦から遷移してきた場合に備えて、オンライン専用の
+    // 画面状態・進行中のタイマーなどを確実にリセットしておく
+    window.__HR_ONLINE_ACTIVE = false;
+    if (typeof window.stopOnlineGame === "function") window.stopOnlineGame();
+    const soloControls = document.getElementById("solo-controls");
+    const onlineControls = document.getElementById("online-controls");
+    const onlineHud = document.getElementById("online-hud");
+    if (soloControls) soloControls.classList.remove("hidden");
+    if (onlineControls) onlineControls.classList.add("hidden");
+    if (onlineHud) onlineHud.classList.add("hidden");
+    const newMapBtn = document.getElementById("btn-new-map");
+    if (newMapBtn) newMapBtn.classList.remove("hidden");
+
     ACTIVE_COLORS = mode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
     USE_DIAGONALS = !!useDiagonals;
     const colorModeBadge = document.getElementById("color-mode-badge");
