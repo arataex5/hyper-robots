@@ -353,13 +353,25 @@ body {
   display: flex;
   gap: 12%;
   margin-bottom: 14%;
+  z-index: 2;
 }
 .robot .eye {
-  width: 22%;
-  height: 22%;
+  position: relative;
+  width: 30%;
+  height: 30%;
   border-radius: 50%;
   background: radial-gradient(circle at 35% 35%, #ffffff, #cfe0ff 60%, #7c8fc9 100%);
-  box-shadow: 0 0 5px 1px rgba(255,255,255,0.85);
+  box-shadow: 0 0 6px 1.5px rgba(255,255,255,0.9), 0 1px 2px rgba(0,0,0,0.3);
+}
+.robot .eye::after {
+  content: "";
+  position: absolute;
+  top: 32%;
+  left: 32%;
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  background: #14182a;
 }
 .robot .mouth {
   position: absolute;
@@ -437,8 +449,8 @@ body {
   height: 62%;
 }
 @keyframes arrowPulse {
-  0%, 100% { transform: scale(0.85); }
-  50% { transform: scale(1.12); }
+  0%, 100% { transform: scale(1.275); }
+  50% { transform: scale(1.68); }
 }
 
 /* target icon shapes */
@@ -744,13 +756,6 @@ body.title-active { overflow: hidden; }
 .disconnect-banner .clear-banner-sub {
   color: #ffd2c2;
   -webkit-text-fill-color: #ffd2c2;
-}
-
-.online-hud-giveup {
-  min-height: 1.2em;
-  font-size: 0.78rem;
-  color: var(--text-faint);
-  text-align: center;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1346,7 +1351,10 @@ body.title-active { overflow: hidden; }
   gap: 6px;
 }
 .online-hud-chip {
-  padding: 5px 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px 4px 4px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--panel-2);
@@ -1354,6 +1362,14 @@ body.title-active { overflow: hidden; }
   font-size: 0.76rem;
   font-weight: 600;
   font-family: "Space Grotesk", sans-serif;
+}
+.online-hud-chip-avatar {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  background: #10141f;
+  border-radius: 6px;
+  border: 1px solid var(--line);
 }
 .online-hud-chip.is-host {
   border-color: #5a7fd6;
@@ -1364,6 +1380,58 @@ body.title-active { overflow: hidden; }
   font-size: 0.8rem;
   color: var(--text-dim);
   text-align: center;
+}
+.online-hud-roomid {
+  min-height: 1.1em;
+  margin-bottom: 4px;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+.online-hud-roomid span {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+}
+.online-hud-nextready {
+  min-height: 1.1em;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.giveup-banner {
+  position: fixed;
+  inset: 0;
+  z-index: 920;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s;
+}
+.giveup-banner.show {
+  opacity: 1;
+  visibility: visible;
+}
+.giveup-banner-text {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.4rem, 6vw, 2.6rem);
+  text-align: center;
+  line-height: 1.5;
+  color: #fff;
+  padding: 0.6em 0.9em;
+  max-width: 90vw;
+  text-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 40px rgba(90,127,214,0.6);
+  background: rgba(16,20,34,0.72);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
 }
 
 .controls.hidden { display: none; }

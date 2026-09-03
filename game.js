@@ -40,6 +40,9 @@
   let targetQueue = [];
   let goalIndex = -1;
   let currentGoal = null;
+  let totalGoals = 0;
+  let gameOver = false;
+  const goalsRemainingEl = document.getElementById("goals-remaining");
 
   let moveHistory = []; // {robot, from, to}
   let historyIndex = 0;
@@ -268,7 +271,7 @@
 
   // ---------- selection ----------
   function onRobotClick(idx) {
-    if (locked) return;
+    if (locked || gameOver) return;
     if (selectedRobot === idx) {
       selectedRobot = null;
       robotEls[idx].classList.remove("selected");
@@ -358,7 +361,7 @@
   }
 
   function undoMove() {
-    if (locked || historyIndex <= 0) return;
+    if (locked || gameOver || historyIndex <= 0) return;
     const entry = moveHistory[historyIndex - 1];
     historyIndex--;
     if (roundState.cleared) {
@@ -380,7 +383,7 @@
   }
 
   function redoMove() {
-    if (locked || historyIndex >= moveHistory.length) return;
+    if (locked || gameOver || historyIndex >= moveHistory.length) return;
     const entry = moveHistory[historyIndex];
     historyIndex++;
     const onDone = () => {
@@ -398,7 +401,7 @@
 
   // 現在の目標が現れた時点の位置まで、全ロボットをまとめて戻す。
   function resetRound() {
-    if (locked || !solverStartSnapshot) return;
+    if (locked || gameOver || !solverStartSnapshot) return;
     if (selectedRobot !== null) {
       robotEls[selectedRobot].classList.remove("selected");
       selectedRobot = null;
@@ -493,7 +496,7 @@
   }
 
   function onCheckClick() {
-    if (locked || roundState.answerRevealed) return;
+    if (locked || gameOver || roundState.answerRevealed) return;
     btnCheck.disabled = true;
 
     if (solverStatus === "found") {
@@ -574,8 +577,8 @@
 
     goalIndex++;
     if (goalIndex >= targetQueue.length) {
-      targetQueue = shuffleArrayLocal(board.targets);
-      goalIndex = 0;
+      endSoloGame();
+      return;
     }
     currentGoal = targetQueue[goalIndex];
 
@@ -596,6 +599,7 @@
 
     placeGoalRing(currentGoal.r, currentGoal.c);
     refreshTargetEmphasis();
+    updateGoalsRemaining();
 
     btnCheck.disabled = false;
     updateMoveCount();
@@ -603,6 +607,34 @@
     setStatus("新しい目標が現れました。ロボットをクリックして動かしてみましょう。", "");
 
     startSolverForGoal(currentGoal);
+  }
+
+  function updateGoalsRemaining() {
+    if (!goalsRemainingEl) return;
+    goalsRemainingEl.textContent = gameOver ? "0" : String(Math.max(0, totalGoals - goalIndex));
+  }
+
+  // すべての目標が出そろったら終了とする
+  function endSoloGame() {
+    gameOver = true;
+    if (checkPollTimer) {
+      clearInterval(checkPollTimer);
+      checkPollTimer = null;
+    }
+    if (selectedRobot !== null) {
+      robotEls[selectedRobot].classList.remove("selected");
+      selectedRobot = null;
+    }
+    clearArrows();
+    if (goalRingEl) goalRingEl.style.display = "none";
+    goalIconEl.innerHTML = "";
+    goalDescEl.textContent = "全問クリア！";
+    updateGoalsRemaining();
+    btnCheck.disabled = true;
+    btnNext.disabled = true;
+    btnUndo.disabled = true;
+    btnRedo.disabled = true;
+    setStatus(`🏁 すべての目標（${totalGoals}問）が終わりました！お疲れさまでした。「新しいマップ」でもう一度遊べます。`, "success");
   }
 
   function shuffleArrayLocal(arr) {
@@ -647,6 +679,8 @@
     board = generateBoard({ useDiagonals: USE_DIAGONALS, colors: ACTIVE_COLORS });
     robots = placeRobotsRandomly();
     targetQueue = shuffleArrayLocal(board.targets);
+    totalGoals = targetQueue.length;
+    gameOver = false;
     goalIndex = -1;
 
     renderBoardStatic();

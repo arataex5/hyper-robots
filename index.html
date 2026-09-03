@@ -164,6 +164,9 @@
   <div class="app">
     <div id="clear-banner" class="clear-banner"></div>
     <div id="disconnect-banner" class="clear-banner disconnect-banner"></div>
+    <div id="giveup-banner" class="giveup-banner">
+      <div class="giveup-banner-text">ほかのプレイヤー全員がギブアップするか、<br>60秒経過するのをお待ちください。</div>
+    </div>
 
     <header class="topbar">
       <h1 class="logo">ハイパーロボット</h1>
@@ -192,6 +195,10 @@
           <span class="stat-label">手数</span>
           <span class="stat-value" id="move-count">0</span>
         </div>
+        <div class="stat">
+          <span class="stat-label">残りゴール</span>
+          <span class="stat-value" id="goals-remaining">-</span>
+        </div>
       </div>
     </section>
 
@@ -207,14 +214,16 @@
       <button id="btn-online-undo" class="btn" disabled>↶ 一個戻る</button>
       <button id="btn-online-redo" class="btn" disabled>↷ 一個進む</button>
       <button id="btn-online-reset" class="btn">⟲ リセット</button>
-      <button id="btn-online-declare" class="btn btn-primary">📣 回答する</button>
+      <button id="btn-online-declare" class="btn btn-primary" disabled>📣 回答する</button>
       <button id="btn-online-giveup" class="btn btn-accent">🏳️ 答えが知りたい！（ギブアップ）</button>
+      <button id="btn-online-next-ready" class="btn btn-primary hidden">👍 次の問題へ進む準備完了</button>
     </section>
 
     <div class="online-hud hidden" id="online-hud">
+      <div class="online-hud-roomid" id="online-hud-roomid"></div>
       <div class="online-hud-players" id="online-hud-players"></div>
       <div class="online-hud-race" id="online-hud-race"></div>
-      <div class="online-hud-giveup" id="online-hud-giveup"></div>
+      <div class="online-hud-nextready" id="online-hud-nextready"></div>
     </div>
 
     <p class="status-line" id="status-line"></p>

@@ -165,8 +165,9 @@
       row.appendChild(nameSpan);
 
       const readyBadge = document.createElement("span");
-      readyBadge.className = "room-player-ready" + (p.ready ? " is-ready" : "");
-      readyBadge.textContent = p.ready ? "準備完了" : "未準備";
+      const isHostRow = p.peerId === room.hostPeerId;
+      readyBadge.className = "room-player-ready" + (p.ready || isHostRow ? " is-ready" : "");
+      readyBadge.textContent = isHostRow ? "ホスト" : p.ready ? "準備完了" : "未準備";
       row.appendChild(readyBadge);
 
       list.appendChild(row);
@@ -228,9 +229,13 @@
       msg.type === "round-result" ||
       msg.type === "round-invalid" ||
       msg.type === "verify-request" ||
-      msg.type === "giveup-vote" ||
-      msg.type === "giveup-tally" ||
-      msg.type === "giveup-reveal"
+      msg.type === "giveup-start" ||
+      msg.type === "giveup-countdown-start" ||
+      msg.type === "giveup-cancelled" ||
+      msg.type === "giveup-reveal" ||
+      msg.type === "next-ready" ||
+      msg.type === "next-ready-tally" ||
+      msg.type === "match-over"
     ) {
       handleGameMessage(msg);
     } else if (msg.type === "verify-submit" && iAmHost) {

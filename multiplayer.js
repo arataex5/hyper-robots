@@ -61,10 +61,12 @@
       bestDeclare: null, // { peerId, moveCount }
       declared: false, // 自分がこのラウンドで既に宣言したか
       myDeclaredMoves: null, // 宣言した時点の手順のスナップショット
-      giveUpVotes: new Set(), // ホスト側のみで使う集計用
       myGiveUpVoted: false,
+      countdownKind: null, // null | "declare" | "giveup" -- 今動いているカウントダウンの種類
       countdownInterval: null,
       countdownRemaining: 0,
+      readyForNext: new Set(), // ホスト側のみで使う集計用（次の問題へ進む準備）
+      myReadyForNext: false,
       locked: false,
     };
     orderedPlayers.forEach((p) => { mp.scores[p.peerId] = 0; });
@@ -247,7 +249,7 @@
   }
 
   function onRobotClick(idx) {
-    if (mp.locked) return;
+    if (mp.locked || mp.matchOver) return;
     if (mp.selectedRobot === idx) {
       mp.selectedRobot = null;
       mp.robotEls[idx].classList.remove("selected");
@@ -261,7 +263,7 @@
   }
 
   function performMove(idx, dir) {
-    if (mp.locked) return;
+    if (mp.locked || mp.matchOver) return;
     const myColor = robotColor(idx);
     const result = window.slide(mp.board, mp.robots, idx, dir, myColor);
     const to = { r: result.r, c: result.c };
@@ -299,6 +301,19 @@
   function updateMoveCount() {
     const el = document.getElementById("move-count");
     if (el) el.textContent = String(mp.historyIndex);
+    refreshDeclareButtonState();
+  }
+
+  // 「回答する」ボタンは、目標に到達していない間はグレーアウトしておく
+  // （すでに自分が宣言・提出済みの間もロックされたままにする）。
+  function refreshDeclareButtonState() {
+    const btn = document.getElementById("btn-online-declare");
+    if (!btn) return;
+    if (mp.declared) {
+      btn.disabled = true;
+      return;
+    }
+    btn.disabled = !isGoalSatisfiedLocally();
   }
 
   function undo() {
@@ -353,7 +368,15 @@
         const chip = document.createElement("span");
         chip.className = "online-hud-chip";
         chip.classList.toggle("is-host", p.peerId === (room_hostPeerId()));
-        chip.textContent = `${p.name || "プレイヤー"}: ${mp.scores[p.peerId] || 0}点`;
+        const avatarBox = document.createElement("div");
+        avatarBox.className = "online-hud-chip-avatar";
+        if (typeof window.renderProfileAvatar === "function") {
+          window.renderProfileAvatar(avatarBox, p.profile);
+        }
+        chip.appendChild(avatarBox);
+        const textSpan = document.createElement("span");
+        textSpan.textContent = `${p.name || "プレイヤー"}: ${mp.scores[p.peerId] || 0}点`;
+        chip.appendChild(textSpan);
         playersBox.appendChild(chip);
       });
     }
@@ -380,12 +403,51 @@
     if (!mp.isHost || mp.matchOver) return;
     mp.goalIndex++;
     if (mp.goalIndex >= mp.targetQueue.length) {
-      mp.targetQueue = shuffle(mp.board.targets);
-      mp.goalIndex = 0;
+      endMatch();
+      return;
     }
     const goal = mp.targetQueue[mp.goalIndex];
     mp.net.broadcast({ type: "goal-reveal", goal, robots: mp.robots });
     applyGoalReveal(goal, mp.robots);
+  }
+
+  // すべてのゴールが出そろったら対戦終了とする
+  function endMatch() {
+    if (!mp.isHost) return;
+    mp.matchOver = true;
+    const topScore = Math.max(...mp.players.map((pl) => mp.scores[pl.peerId] || 0));
+    const winners = mp.players.filter((pl) => (mp.scores[pl.peerId] || 0) === topScore);
+    const winnerText = winners.map((w) => w.name || "プレイヤー").join("・");
+    const msg = { type: "match-over", scores: mp.scores, winnerText };
+    mp.net.broadcast(msg);
+    applyMatchOver(msg);
+  }
+
+  function applyMatchOver(msg) {
+    mp.matchOver = true;
+    mp.scores = msg.scores;
+    finalizeMatchOverUI();
+    setStatus(`🏁 すべてのゴールが終了しました！ 優勝: ${msg.winnerText}`);
+    renderHud();
+  }
+
+  // 対戦終了時の画面まわりの後始末（早期決着・全ゴール消化の両方から呼ばれる）
+  function finalizeMatchOverUI() {
+    stopCountdown();
+    mp.countdownKind = null;
+    hideGiveUpBanner();
+    setControlsLocked(true);
+    const giveUpBtn = document.getElementById("btn-online-giveup");
+    if (giveUpBtn) giveUpBtn.disabled = true;
+    const nextReadyBtn = document.getElementById("btn-online-next-ready");
+    if (nextReadyBtn) nextReadyBtn.classList.add("hidden");
+    updateGoalsRemaining();
+  }
+
+  function updateGoalsRemaining() {
+    const el = document.getElementById("goals-remaining");
+    if (!el) return;
+    el.textContent = mp.matchOver ? "0" : String(Math.max(0, mp.totalRounds - mp.goalIndex));
   }
 
   function shuffle(arr) {
@@ -398,17 +460,23 @@
   }
 
   function applyGoalReveal(goal, robots) {
+    mp.isHost = window.HRNet.isHost(); // ホスト引き継ぎが起きていた場合に備えて毎ラウンド再確認する
+    updateNewMapButtonForOnline();
     mp.currentGoal = goal;
     mp.roundStartSnapshot = robots.map((p) => ({ ...p }));
     mp.robots = robots.map((p) => ({ ...p }));
     mp.bestDeclare = null;
     mp.declared = false;
     mp.myDeclaredMoves = null;
-    mp.giveUpVotes = new Set();
     mp.myGiveUpVoted = false;
+    mp.countdownKind = null;
+    hideGiveUpBanner();
     setControlsLocked(false);
     const giveUpBtn = document.getElementById("btn-online-giveup");
     if (giveUpBtn) giveUpBtn.disabled = false;
+    const nextReadyBtn = document.getElementById("btn-online-next-ready");
+    if (nextReadyBtn) nextReadyBtn.classList.add("hidden");
+    renderNextReadyStatus(0, 0);
     stopCountdown();
     if (mp.selectedRobot !== null) {
       mp.robotEls[mp.selectedRobot].classList.remove("selected");
@@ -421,6 +489,7 @@
     mp.robots.forEach((p, i) => setPercentPos(mp.robotEls[i], p.r, p.c));
     placeGoalRing();
     refreshTargetEmphasis();
+    updateGoalsRemaining();
     const shapeLabel = SHAPE_INFO[goal.shape].label;
     const desc =
       goal.color === "rainbow"
@@ -438,7 +507,6 @@
     setStatus("新しい目標が現れました。ロボットを動かしてゴールしたら「回答する」で宣言しましょう。");
     renderHud();
     renderRaceStatus();
-    renderGiveUpStatus();
   }
 
   function isGoalSatisfiedLocally() {
@@ -451,8 +519,10 @@
     return idx >= 0 && mp.robots[idx] && mp.robots[idx].r === g.r && mp.robots[idx].c === g.c;
   }
 
+  const GIVEUP_TIMEOUT_SEC = 60;
+
   function declare() {
-    if (!mp.currentGoal || mp.declared) return;
+    if (!mp.currentGoal || mp.declared || mp.matchOver) return;
     if (!isGoalSatisfiedLocally()) {
       setStatus("まだ目標のマスに到達していません。ロボットを動かしてからもう一度「回答する」を押してください。");
       return;
@@ -461,10 +531,11 @@
     mp.declared = true;
     mp.myDeclaredMoves = mp.moveHistory.slice(0, mp.historyIndex).map((m) => ({ robot: m.robot, dir: m.dir }));
     setControlsLocked(true);
+    const giveUpBtn = document.getElementById("btn-online-giveup");
+    if (giveUpBtn) giveUpBtn.disabled = true;
     const msg = { type: "declare-update", peerId: mp.myPeerId, moveCount: mp.historyIndex };
     if (mp.isHost) {
       applyDeclare(msg);
-      mp.net.broadcast(msg);
     } else {
       mp.net.broadcast(msg); // ホストが受け取って採否を判断する
     }
@@ -477,32 +548,57 @@
     });
   }
 
+  // ホストのみ: 宣言を受け取って採用するかどうかを判定する。
+  // 「通常のカウントダウンタイムは、一度作動したら更新されることはない」
+  // という仕様のため、カウントダウンを開始するのは最初の宣言（または
+  // ギブアップ待ちを割り込んで中断させた時）だけで、その後により良い
+  // 宣言が来てもタイマー自体はリセットしない（表示だけ更新する）。
   function applyDeclare(msg) {
     if (!mp.isHost) return;
-    if (!mp.bestDeclare || msg.moveCount < mp.bestDeclare.moveCount) {
-      mp.bestDeclare = { peerId: msg.peerId, moveCount: msg.moveCount };
-      startCountdown();
-      mp.net.broadcast({ type: "declare-update", peerId: msg.peerId, moveCount: msg.moveCount, timeLimit: mp.settings.answerTimeLimit });
+    const isNewBest = !mp.bestDeclare || msg.moveCount < mp.bestDeclare.moveCount;
+    if (!isNewBest) return;
+    mp.bestDeclare = { peerId: msg.peerId, moveCount: msg.moveCount };
+
+    if (mp.countdownKind !== "declare") {
+      // ギブアップ待ちだった場合はここで打ち切り、通常カウントダウンに切り替える
+      const wasGiveUp = mp.countdownKind === "giveup";
+      mp.countdownKind = "declare";
+      startCountdown(mp.settings.answerTimeLimit, requestVerification);
+      const payload = {
+        type: "declare-update",
+        peerId: msg.peerId,
+        moveCount: msg.moveCount,
+        timeLimit: mp.settings.answerTimeLimit,
+      };
+      mp.net.broadcast(payload);
+      if (wasGiveUp) {
+        mp.net.broadcast({ type: "giveup-cancelled" });
+        applyGiveUpCancelled();
+      }
+    } else {
+      renderRaceStatus();
+      mp.net.broadcast({ type: "declare-update", peerId: msg.peerId, moveCount: msg.moveCount });
     }
   }
 
-  function startCountdown() {
+  // seconds: カウントダウンの長さ。onExpire: ホストの権威あるタイマーが
+  // 0になった時にだけ呼ばれるコールバック（ゲスト表示専用の場合は省略）。
+  function startCountdown(seconds, onExpire) {
     stopCountdown();
-    mp.countdownRemaining = mp.settings.answerTimeLimit;
+    mp.countdownRemaining = seconds;
     renderRaceStatus();
     mp.countdownInterval = setInterval(() => {
       mp.countdownRemaining--;
       renderRaceStatus();
       if (mp.countdownRemaining <= 0) {
         stopCountdown();
-        if (mp.isHost) requestVerification();
+        if (mp.isHost && onExpire) onExpire();
       }
     }, 1000);
   }
 
   // ゲスト側の表示専用カウントダウン。実際の判定・検証要求はホストの
-  // カウントダウン（startCountdown）だけが行うので、ここでは見た目の
-  // 秒数を進めるだけ。
+  // カウントダウンだけが行うので、ここでは見た目の秒数を進めるだけ。
   function startDisplayCountdown(initialSeconds) {
     stopCountdown();
     mp.countdownRemaining = initialSeconds;
@@ -565,6 +661,7 @@
       }
     }
     const countMatches = msg.moves.length === mp.bestDeclare.moveCount;
+    mp.countdownKind = null;
 
     if (valid && reachedGoal && countMatches) {
       mp.scores[msg.peerId] = (mp.scores[msg.peerId] || 0) + 1;
@@ -581,8 +678,6 @@
       applyRoundResult({ winnerId: msg.peerId, moveCount: msg.moves.length, scores: mp.scores, roundsPlayed: mp.roundsPlayed, matchOver: decided });
       if (decided) {
         mp.matchOver = true;
-      } else {
-        setTimeout(() => nextGoal(), 1800);
       }
     } else {
       mp.net.broadcast({ type: "round-invalid", peerId: msg.peerId });
@@ -613,11 +708,13 @@
     const p = mp.players.find((x) => x.peerId === msg.winnerId);
     if (msg.matchOver) {
       mp.matchOver = true;
+      finalizeMatchOverUI();
       const topScore = Math.max(...mp.players.map((pl) => mp.scores[pl.peerId] || 0));
       const winner = mp.players.find((pl) => (mp.scores[pl.peerId] || 0) === topScore);
       setStatus(`🎉 ${p ? p.name : "?"} が ${msg.moveCount}手でクリア！ 逆転不可能のため対戦終了 — 優勝: ${winner ? winner.name : "?"}`);
     } else {
       setStatus(`🎉 ${p ? p.name : "?"} が ${msg.moveCount}手でクリア！`);
+      awaitNextRoundReady();
     }
     renderHud();
   }
@@ -630,30 +727,34 @@
       mp.declared = false;
       mp.myDeclaredMoves = null;
       setControlsLocked(false);
+      refreshDeclareButtonState();
     }
     renderRaceStatus();
   }
 
   // ================= ギブアップ（答えを見る） =================
+  // 誰か一人が押すだけで60秒のカウントダウンが始まる。その間に誰かが
+  // 「回答する」を押せば通常の回答レースに切り替わり、誰も回答しな
+  // ければ60秒後にコンピュータが答えを見せる。
 
-  function renderGiveUpStatus() {
-    const box = document.getElementById("online-hud-giveup");
-    if (box) box.textContent = "";
+  function showGiveUpBanner() {
+    const banner = document.getElementById("giveup-banner");
+    if (banner) banner.classList.add("show");
   }
 
-  function applyGiveUpTally(msg) {
-    const box = document.getElementById("online-hud-giveup");
-    if (box) box.textContent = `🏳️ ギブアップ: ${msg.count}/${msg.total}人`;
+  function hideGiveUpBanner() {
+    const banner = document.getElementById("giveup-banner");
+    if (banner) banner.classList.remove("show");
   }
 
   function giveUp() {
-    if (!mp.currentGoal || mp.myGiveUpVoted) return;
+    if (!mp.currentGoal || mp.myGiveUpVoted || mp.declared || mp.countdownKind !== null || mp.matchOver) return;
     mp.myGiveUpVoted = true;
     const btn = document.getElementById("btn-online-giveup");
     if (btn) btn.disabled = true;
-    const msg = { type: "giveup-vote", peerId: mp.myPeerId };
+    const msg = { type: "giveup-start", peerId: mp.myPeerId };
     if (mp.isHost) {
-      applyGiveUpVote(msg);
+      applyGiveUpStart(msg);
     } else {
       mp.net.broadcast(msg);
     }
@@ -665,23 +766,33 @@
     return list;
   }
 
-  function applyGiveUpVote(msg) {
-    if (!mp.isHost) return;
-    mp.giveUpVotes.add(msg.peerId);
-    const active = activePeerIds();
-    const total = active.length;
-    const count = active.filter((id) => mp.giveUpVotes.has(id)).length;
-    if (total > 0 && count >= total) {
-      revealGiveUpAnswer();
-    } else {
-      const tally = { type: "giveup-tally", count, total };
-      mp.net.broadcast(tally);
-      applyGiveUpTally(tally);
+  function applyGiveUpStart(msg) {
+    if (!mp.isHost || mp.countdownKind !== null) return;
+    mp.countdownKind = "giveup";
+    startCountdown(GIVEUP_TIMEOUT_SEC, revealGiveUpAnswer);
+    const payload = { type: "giveup-countdown-start", timeLimit: GIVEUP_TIMEOUT_SEC };
+    mp.net.broadcast(payload);
+    applyGiveUpCountdownStart(payload);
+  }
+
+  function applyGiveUpCountdownStart(msg) {
+    showGiveUpBanner();
+    const btn = document.getElementById("btn-online-giveup");
+    if (btn) btn.disabled = true;
+    if (!mp.isHost) {
+      startDisplayCountdown(msg.timeLimit);
     }
+  }
+
+  // 誰かが回答してギブアップ待ちが打ち切られた場合
+  function applyGiveUpCancelled() {
+    hideGiveUpBanner();
   }
 
   function revealGiveUpAnswer() {
     if (!mp.isHost) return;
+    mp.countdownKind = null;
+    hideGiveUpBanner();
     const goalColorIdx = mp.currentGoal.color === "rainbow" ? "any" : colorIndexOfColor(mp.currentGoal.color);
     const solver = new IncrementalSolver(mp.board, mp.roundStartSnapshot, goalColorIdx, mp.currentGoal.r, mp.currentGoal.c, mp.colors);
     let solved = null;
@@ -697,12 +808,14 @@
   }
 
   function applyGiveUpReveal(msg) {
+    mp.countdownKind = null;
+    hideGiveUpBanner();
     stopCountdown();
     setControlsLocked(true);
     const path = msg.path || [];
     if (path.length === 0) {
       setStatus("😢 コンピュータでも手順を見つけられませんでした。");
-      if (mp.isHost) setTimeout(() => nextGoal(), 2200);
+      awaitNextRoundReady();
       return;
     }
     setStatus(`🤖 コンピュータの最短手順は ${path.length}手 でした。`);
@@ -711,7 +824,7 @@
     let i = 0;
     function step() {
       if (i >= path.length) {
-        if (mp.isHost) setTimeout(() => nextGoal(), 1800);
+        awaitNextRoundReady();
         return;
       }
       const s = path[i++];
@@ -719,6 +832,61 @@
       animateAlongPath(s.robot, waypoints, step);
     }
     step();
+  }
+
+  // ================= 次の問題への準備確認 =================
+  // ラウンドが終わった直後に自動で次のお題へ進めるのではなく、全員が
+  // 「準備完了」を押すのを待ってから次のゴールを表示する。
+
+  function renderNextReadyStatus(count, total) {
+    const box = document.getElementById("online-hud-nextready");
+    if (box) box.textContent = total ? `👍 次の問題へ進む準備: ${count}/${total}人` : "";
+  }
+
+  function awaitNextRoundReady() {
+    mp.readyForNext = new Set();
+    mp.myReadyForNext = false;
+    const btn = document.getElementById("btn-online-next-ready");
+    if (btn) {
+      btn.classList.remove("hidden");
+      btn.disabled = false;
+    }
+    renderNextReadyStatus(0, activePeerIds().length);
+  }
+
+  function nextRoundReady() {
+    if (mp.myReadyForNext) return;
+    mp.myReadyForNext = true;
+    const btn = document.getElementById("btn-online-next-ready");
+    if (btn) btn.disabled = true;
+    const msg = { type: "next-ready", peerId: mp.myPeerId };
+    if (mp.isHost) {
+      applyNextReady(msg);
+    } else {
+      mp.net.broadcast(msg);
+    }
+  }
+
+  function applyNextReady(msg) {
+    if (!mp.isHost) return;
+    mp.readyForNext.add(msg.peerId);
+    const active = activePeerIds();
+    const total = active.length;
+    const count = active.filter((id) => mp.readyForNext.has(id)).length;
+    if (total > 0 && count >= total) {
+      const btn = document.getElementById("btn-online-next-ready");
+      if (btn) btn.classList.add("hidden");
+      renderNextReadyStatus(0, 0);
+      nextGoal();
+    } else {
+      const tally = { type: "next-ready-tally", count, total };
+      mp.net.broadcast(tally);
+      applyNextReadyTally(tally);
+    }
+  }
+
+  function applyNextReadyTally(msg) {
+    renderNextReadyStatus(msg.count, msg.total);
   }
 
   // ================= 切断通知（でかでかバナー） =================
@@ -747,6 +915,7 @@
       } else if (!mp.bestDeclare || msg.moveCount < mp.bestDeclare.moveCount) {
         mp.bestDeclare = { peerId: msg.peerId, moveCount: msg.moveCount };
         if (msg.timeLimit) {
+          mp.countdownKind = "declare";
           startDisplayCountdown(msg.timeLimit);
         }
         renderRaceStatus();
@@ -757,12 +926,21 @@
       applyRoundResult(msg);
     } else if (msg.type === "round-invalid") {
       applyRoundInvalid(msg);
-    } else if (msg.type === "giveup-vote") {
-      if (mp.isHost) applyGiveUpVote(msg);
-    } else if (msg.type === "giveup-tally") {
-      applyGiveUpTally(msg);
+    } else if (msg.type === "giveup-start") {
+      if (mp.isHost) applyGiveUpStart(msg);
+    } else if (msg.type === "giveup-countdown-start") {
+      mp.countdownKind = "giveup";
+      applyGiveUpCountdownStart(msg);
+    } else if (msg.type === "giveup-cancelled") {
+      applyGiveUpCancelled();
     } else if (msg.type === "giveup-reveal") {
       applyGiveUpReveal(msg);
+    } else if (msg.type === "next-ready") {
+      if (mp.isHost) applyNextReady(msg);
+    } else if (msg.type === "next-ready-tally") {
+      applyNextReadyTally(msg);
+    } else if (msg.type === "match-over") {
+      applyMatchOver(msg);
     }
   };
 
@@ -828,6 +1006,10 @@
     document.getElementById("online-controls").classList.remove("hidden");
     document.getElementById("online-hud").classList.remove("hidden");
     updateNewMapButtonForOnline();
+    const roomIdEl = document.getElementById("online-hud-roomid");
+    if (roomIdEl && window.HRNet && window.HRNet.getRoomId()) {
+      roomIdEl.innerHTML = `ルームID：<span>${window.HRNet.getRoomId()}</span>`;
+    }
 
     renderBoard();
     mp.robots = placeRobotsRandomly();
@@ -848,6 +1030,7 @@
       document.getElementById("btn-online-reset").addEventListener("click", resetToRoundStart);
       document.getElementById("btn-online-declare").addEventListener("click", declare);
       document.getElementById("btn-online-giveup").addEventListener("click", giveUp);
+      document.getElementById("btn-online-next-ready").addEventListener("click", nextRoundReady);
       document.getElementById("btn-new-map").addEventListener("click", () => {
         if (!window.__HR_ONLINE_ACTIVE || !mp || !mp.isHost) return;
         regenerateGame();
