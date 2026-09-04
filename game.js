@@ -854,7 +854,13 @@
 
   // テスト用に内部状態を覗ける・強制的に「思考中」状態にできるようにしておく
   window._HRSoloDebug = {
-    forceSearching: () => { solverStatus = "searching"; },
+    // 「思考中」オーバーレイのテスト用: 本物のソルバーがすぐ答えを
+    // 見つけてしまうと searching → found が上書きされてテストが
+    // 不安定になるため、ソルバー自体もダミーに差し替えて止めておく。
+    forceSearching: () => {
+      solverStatus = "searching";
+      solver = { step: () => ({ status: "continue" }) };
+    },
     getSolverStatus: () => solverStatus,
   };
 })();

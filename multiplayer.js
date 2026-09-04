@@ -620,6 +620,10 @@
         mp.net.broadcast({ type: "giveup-cancelled" });
         applyGiveUpCancelled();
       }
+      // チャンピオンがいなかった時点で、既に他の全員がギブアップ済み
+      // だった場合（＝このチャンピオンが最後の一人として答えただけ）は、
+      // 新たにカウントダウンを待つ必要はなく、今すぐ決着とする。
+      maybeResolveIfAllOthersAlreadyConceded();
     } else {
       renderRaceStatus();
       mp.net.broadcast({ type: "declare-update", peerId: msg.peerId, moveCount: msg.moveCount });
@@ -848,23 +852,36 @@
   // ギブアップボタンは文脈によって意味が変わる:
   //   ・まだ誰もチャンピオンになっていない -> 「誰も分からない、コンピュータに見せてほしい」(60秒タイマー)
   //   ・すでにチャンピオンがいる -> 「このチャンピオンに降参する」(チャンピオン以外全員が降参したら即決着)
+  // 現在のチャンピオン以外の「アクティブな全員」が既にギブアップ済み
+  // なら、カウントダウンを待たずに今すぐ決着とする。
+  // ・ギブアップの投票が増えた時（applyGiveUpVote）
+  // ・チャンピオンがいなかった状態から新たにチャンピオンが生まれた時
+  //   （applyDeclare。既に他の全員がギブアップ済みだったケース）
+  // の両方から呼ばれる。
+  function maybeResolveIfAllOthersAlreadyConceded() {
+    if (!mp.bestDeclare) return false;
+    const championId = mp.bestDeclare.peerId;
+    const others = activePeerIds().filter((id) => id !== championId);
+    const total = others.length;
+    const count = others.filter((id) => mp.giveUpVoters.has(id)).length;
+    if (total > 0 && count >= total) {
+      stopCountdown();
+      requestVerification();
+      return true;
+    }
+    return false;
+  }
+
   function applyGiveUpVote(msg) {
     if (!mp.isHost) return;
     mp.giveUpVoters.add(msg.peerId);
     renderHud(); // ホスト自身の画面にもすぐ反映する
 
     if (mp.bestDeclare) {
-      const championId = mp.bestDeclare.peerId;
-      const others = activePeerIds().filter((id) => id !== championId);
-      const total = others.length;
-      const count = others.filter((id) => mp.giveUpVoters.has(id)).length;
       const tally = { type: "giveup-concede-tally", giveUpPeerIds: Array.from(mp.giveUpVoters) };
       mp.net.broadcast(tally);
       applyGiveUpConcedeTally(tally);
-      if (total > 0 && count >= total) {
-        stopCountdown();
-        requestVerification();
-      }
+      maybeResolveIfAllOthersAlreadyConceded();
     } else if (mp.countdownKind === null) {
       applyGiveUpStart(msg);
     } else if (mp.countdownKind === "giveup") {

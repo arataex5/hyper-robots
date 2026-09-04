@@ -299,6 +299,41 @@ function buildCandidateBoard() {
     lCorners.push({ r, c, dirs: [dir, impliedEdgeDir] });
   });
 
+  // ターゲット・レインボーのL字コーナーが、たまたま盤面の一番外側の
+  // 行／列（0行目・15行目・0列目・15列目）に位置している場合、外枠の
+  // 壁も「もう一辺」として扱う。ノッチは上ですでに対応済みだが、通常の
+  // L字コーナーにこれをしないと、「外周壁と組み合わさって冠・受け皿・
+  // コ・Cの形になる」パターン（外枠がもう片方の腕を担うケース）を
+  // 見逃してしまう。
+  lCorners.forEach((corner) => {
+    const implied = [];
+    if (corner.r === 0 && !corner.dirs.includes("N")) implied.push("N");
+    if (corner.r === 15 && !corner.dirs.includes("S")) implied.push("S");
+    if (corner.c === 0 && !corner.dirs.includes("W")) implied.push("W");
+    if (corner.c === 15 && !corner.dirs.includes("E")) implied.push("E");
+    if (implied.length > 0) corner.dirs = corner.dirs.concat(implied);
+  });
+
+  // 中央コア（2x2）に隣接するL字コーナーも同様。コア自体が4方向とも
+  // 壁で塞がれているため、コアに接するマスは「コア側を向いた壁」を
+  // 自前で持たなくても、その方向への移動はコアの壁によって既に
+  // ブロックされている。これを考慮しないと、コアを挟んで向き合う
+  // 2つのL字コーナー（例：コアのすぐ下の行に2つの目標が離れて並び、
+  // どちらもコア側の壁を持たないが、実質的にコアが「共有の壁」の
+  // 役割を果たして冠・受け皿の形になるケース）を見逃してしまう。
+  const CORE_ADJACENT_IMPLIED = {
+    "6,7": "S", "6,8": "S", // コアの真上
+    "9,7": "N", "9,8": "N", // コアの真下
+    "7,6": "E", "8,6": "E", // コアの真左
+    "7,9": "W", "8,9": "W", // コアの真右
+  };
+  lCorners.forEach((corner) => {
+    const impliedDir = CORE_ADJACENT_IMPLIED[`${corner.r},${corner.c}`];
+    if (impliedDir && !corner.dirs.includes(impliedDir)) {
+      corner.dirs = corner.dirs.concat([impliedDir]);
+    }
+  });
+
   // 検証1: どの格子点でも「異なるグループ」が同時に接していないこと。
   // （同一グループ内でのL字や、コア自身の内部構造は問題なし）
   let valid = true;
@@ -335,7 +370,7 @@ function buildCandidateBoard() {
     if (boxes.length > 0) valid = false;
   }
 
-  return { valid, hWalls, vWalls, blocked, targets };
+  return { valid, hWalls, vWalls, blocked, targets, lCorners };
 }
 
 // 「コの字／Cの字／冠の形／受け皿の形」判定 ---------------------------------
