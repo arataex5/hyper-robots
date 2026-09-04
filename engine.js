@@ -17,6 +17,55 @@ const DIRS = {
 };
 const DIR_ROT_CW = { N: "E", E: "S", S: "W", W: "N" };
 
+// ゴールの位置を示す矢印＋「ここ」ラベルを、盤面からはみ出さない向きに
+// 配置するための計算。r,c から見て一番余裕のある方向（上下左右のうち
+// 空きマスが一番多い側）にラベル側を置き、矢印はゴールのマスを指す形に
+// する。返り値はパーセンテージ単位（盤面基準）の配置情報。
+// game.js（ソロ）・multiplayer.js（オンライン）の両方から呼ばれる共通処理。
+function computeGoalIndicatorPlacement(r, c) {
+  const topClear = r;
+  const bottomClear = SIZE - 1 - r;
+  const leftClear = c;
+  const rightClear = SIZE - 1 - c;
+  const maxClear = Math.max(topClear, bottomClear, leftClear, rightClear);
+
+  let dir;
+  if (maxClear === topClear) dir = "down"; // 矢印はゴールの上に置き、下向きに指す
+  else if (maxClear === bottomClear) dir = "up";
+  else if (maxClear === leftClear) dir = "right";
+  else dir = "left";
+
+  const cell = 100 / SIZE;
+  const length = cell * 1.5; // 矢印+文字の、指す方向に沿った長さ
+  const thickness = cell * 0.55; // 指す方向と垂直な太さ
+  const cellLeft = c * cell;
+  const cellTop = r * cell;
+
+  let left, top, width, height;
+  if (dir === "down") {
+    width = thickness;
+    height = length;
+    left = cellLeft + cell / 2 - width / 2;
+    top = cellTop - height;
+  } else if (dir === "up") {
+    width = thickness;
+    height = length;
+    left = cellLeft + cell / 2 - width / 2;
+    top = cellTop + cell;
+  } else if (dir === "right") {
+    width = length;
+    height = thickness;
+    left = cellLeft - width;
+    top = cellTop + cell / 2 - height / 2;
+  } else {
+    width = length;
+    height = thickness;
+    left = cellLeft + cell;
+    top = cellTop + cell / 2 - height / 2;
+  }
+  return { dir, left, top, width, height };
+}
+
 function rotateDir(dir, k) {
   let d = dir;
   for (let i = 0; i < k; i++) d = DIR_ROT_CW[d];

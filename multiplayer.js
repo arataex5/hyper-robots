@@ -167,10 +167,16 @@
       });
     }
 
-    mp.goalRingEl = document.createElement("div");
-    mp.goalRingEl.className = "goal-ring";
-    mp.goalRingEl.style.display = "none";
-    boardEl.appendChild(mp.goalRingEl);
+    mp.goalArrowEl = document.createElement("div");
+    mp.goalArrowEl.className = "goal-arrow-indicator";
+    mp.goalArrowEl.style.display = "none";
+    mp.goalArrowEl.innerHTML =
+      '<span class="goal-arrow-indicator-text">ここ</span>' +
+      '<div class="goal-arrow-indicator-shape">' +
+      '<svg viewBox="0 0 100 44" xmlns="http://www.w3.org/2000/svg">' +
+      '<polygon points="2,15 52,15 52,2 98,22 52,42 52,29 2,29" fill="#ff1a2e" stroke="#0a0a0a" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>' +
+      "</svg></div>";
+    boardEl.appendChild(mp.goalArrowEl);
   }
 
   function renderRobots() {
@@ -201,15 +207,16 @@
     if (icon) icon.classList.add("active");
   }
 
-  function placeGoalRing() {
+  function placeGoalIndicator() {
     if (!mp.currentGoal) return;
     const g = mp.currentGoal;
-    mp.goalRingEl.style.display = "block";
-    mp.goalRingEl.style.left = (g.c / 16) * 100 + "%";
-    mp.goalRingEl.style.top = (g.r / 16) * 100 + "%";
-    mp.goalRingEl.style.width = 100 / 16 + "%";
-    mp.goalRingEl.style.height = 100 / 16 + "%";
-    mp.goalRingEl.style.color = g.color === "rainbow" ? "var(--c-rainbow)" : `var(--c-${g.color})`;
+    const p = computeGoalIndicatorPlacement(g.r, g.c);
+    mp.goalArrowEl.className = `goal-arrow-indicator dir-${p.dir}`;
+    mp.goalArrowEl.style.display = "flex";
+    mp.goalArrowEl.style.left = p.left + "%";
+    mp.goalArrowEl.style.top = p.top + "%";
+    mp.goalArrowEl.style.width = p.width + "%";
+    mp.goalArrowEl.style.height = p.height + "%";
   }
 
   // ================= ロボット移動（ローカルの「考え中」操作） =================
@@ -520,7 +527,7 @@
     mp.historyIndex = 0;
     updateMoveCount();
     mp.robots.forEach((p, i) => setPercentPos(mp.robotEls[i], p.r, p.c));
-    placeGoalRing();
+    placeGoalIndicator();
     refreshTargetEmphasis();
     updateGoalsRemaining();
     const shapeLabel = SHAPE_INFO[goal.shape].label;

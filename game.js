@@ -35,7 +35,7 @@
   let cellEls = []; // [r][c] -> DOM element
   let robotEls = []; // indexed by ACTIVE_COLORS -> DOM element
   let arrowEls = []; // currently displayed arrow elements
-  let goalRingEl = null;
+  let goalArrowEl = null;
 
   let targetQueue = [];
   let goalIndex = -1;
@@ -169,10 +169,16 @@
       });
     }
 
-    goalRingEl = document.createElement("div");
-    goalRingEl.className = "goal-ring";
-    goalRingEl.style.display = "none";
-    boardEl.appendChild(goalRingEl);
+    goalArrowEl = document.createElement("div");
+    goalArrowEl.className = "goal-arrow-indicator";
+    goalArrowEl.style.display = "none";
+    goalArrowEl.innerHTML =
+      '<span class="goal-arrow-indicator-text">ここ</span>' +
+      '<div class="goal-arrow-indicator-shape">' +
+      '<svg viewBox="0 0 100 44" xmlns="http://www.w3.org/2000/svg">' +
+      '<polygon points="2,15 52,15 52,2 98,22 52,42 52,29 2,29" fill="#ff1a2e" stroke="#0a0a0a" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>' +
+      "</svg></div>";
+    boardEl.appendChild(goalArrowEl);
   }
 
   function renderRobots() {
@@ -204,14 +210,14 @@
     });
   }
 
-  function placeGoalRing(r, c) {
-    const color = currentGoal ? currentGoal.color : null;
-    goalRingEl.style.display = "block";
-    goalRingEl.style.left = (c / 16) * 100 + "%";
-    goalRingEl.style.top = (r / 16) * 100 + "%";
-    goalRingEl.style.width = 100 / 16 + "%";
-    goalRingEl.style.height = 100 / 16 + "%";
-    goalRingEl.style.color = color ? `var(--c-${color})` : "#fff";
+  function placeGoalIndicator(r, c) {
+    const p = computeGoalIndicatorPlacement(r, c);
+    goalArrowEl.className = `goal-arrow-indicator dir-${p.dir}`;
+    goalArrowEl.style.display = "flex";
+    goalArrowEl.style.left = p.left + "%";
+    goalArrowEl.style.top = p.top + "%";
+    goalArrowEl.style.width = p.width + "%";
+    goalArrowEl.style.height = p.height + "%";
   }
 
   function refreshTargetEmphasis() {
@@ -597,7 +603,7 @@
         ? `いずれかのロボットを${shapeLabel}のマスへ`
         : `${COLOR_INFO[currentGoal.color].label}ロボットを${shapeLabel}のマスへ`;
 
-    placeGoalRing(currentGoal.r, currentGoal.c);
+    placeGoalIndicator(currentGoal.r, currentGoal.c);
     refreshTargetEmphasis();
     updateGoalsRemaining();
 
@@ -626,7 +632,7 @@
       selectedRobot = null;
     }
     clearArrows();
-    if (goalRingEl) goalRingEl.style.display = "none";
+    if (goalArrowEl) goalArrowEl.style.display = "none";
     goalIconEl.innerHTML = "";
     goalDescEl.textContent = "全問クリア！";
     updateGoalsRemaining();

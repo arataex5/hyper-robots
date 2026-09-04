@@ -254,18 +254,66 @@ body {
   opacity: 1;
 }
 
-.goal-ring {
+/* ゴールの位置を示す矢印＋「ここ」ラベル。ロボットの上にも出るよう
+   z-indexを高くし、盤面からはみ出さない向きはJS側（computeGoalIndicatorPlacement）
+   で計算する。 */
+.goal-arrow-indicator {
   position: absolute;
-  inset: 6%;
-  border-radius: 50%;
-  border: 2px solid currentColor;
-  animation: ringPulse 1.4s ease-in-out infinite;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4%;
   pointer-events: none;
 }
+.goal-arrow-indicator.dir-down { flex-direction: column; }
+.goal-arrow-indicator.dir-up { flex-direction: column-reverse; }
+.goal-arrow-indicator.dir-right { flex-direction: row; }
+.goal-arrow-indicator.dir-left { flex-direction: row-reverse; }
 
-@keyframes ringPulse {
-  0%, 100% { transform: scale(0.86); opacity: 0.35; }
-  50% { transform: scale(1.04); opacity: 0.9; }
+.goal-arrow-indicator-text {
+  flex: none;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 900;
+  font-size: clamp(9px, 1.9vw, 13px);
+  color: #ff1a2e;
+  -webkit-text-stroke: 2.5px #0a0a0a;
+  paint-order: stroke fill;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.goal-arrow-indicator-shape {
+  flex: none;
+  width: 62%;
+  height: 62%;
+}
+.dir-down .goal-arrow-indicator-shape,
+.dir-up .goal-arrow-indicator-shape {
+  width: 78%;
+  height: 46%;
+}
+.dir-left .goal-arrow-indicator-shape,
+.dir-right .goal-arrow-indicator-shape {
+  width: 46%;
+  height: 78%;
+}
+.dir-down .goal-arrow-indicator-shape { transform: rotate(90deg); }
+.dir-up .goal-arrow-indicator-shape { transform: rotate(-90deg); }
+.dir-right .goal-arrow-indicator-shape { transform: rotate(0deg); }
+.dir-left .goal-arrow-indicator-shape { transform: rotate(180deg); }
+
+.goal-arrow-indicator-shape svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  animation: goalArrowBounce 0.85s ease-in-out infinite;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+}
+@keyframes goalArrowBounce {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(22%); }
 }
 
 /* reactor core in the center 2x2 — a solid, permanently blocked area.
@@ -451,7 +499,7 @@ body {
 }
 @keyframes arrowPulse {
   0%, 100% { transform: scale(1.275); }
-  50% { transform: scale(1.68); }
+  50% { transform: scale(1.48); }
 }
 
 /* target icon shapes */
@@ -511,7 +559,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .robot, .goal-ring, .move-arrow .badge {
+  .robot, .goal-arrow-indicator-shape svg, .move-arrow .badge {
     animation: none !important;
     transition-duration: 0.01ms !important;
   }
