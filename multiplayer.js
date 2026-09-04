@@ -372,10 +372,20 @@
           window.renderProfileAvatar(avatarBox, p.profile);
         }
         chip.appendChild(avatarBox);
-        const textSpan = document.createElement("span");
+        const infoBox = document.createElement("span");
+        infoBox.className = "online-hud-chip-info";
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "online-hud-chip-name";
         const disconnectedLabel = isPlayerConnected(p) ? "" : "［切断中］";
-        textSpan.textContent = `${p.name || "プレイヤー"}${disconnectedLabel}: ${mp.scores[p.peerId] || 0}点`;
-        chip.appendChild(textSpan);
+        nameSpan.textContent = `${p.name || "プレイヤー"}${disconnectedLabel}: ${mp.scores[p.peerId] || 0}点`;
+        infoBox.appendChild(nameSpan);
+        if (mp.giveUpVoters.has(p.peerId)) {
+          const giveUpTag = document.createElement("span");
+          giveUpTag.className = "online-hud-chip-giveup";
+          giveUpTag.textContent = "🏳️ ギブアップ済み";
+          infoBox.appendChild(giveUpTag);
+        }
+        chip.appendChild(infoBox);
         playersBox.appendChild(chip);
       });
     }
@@ -390,6 +400,10 @@
   function renderRaceStatus() {
     const raceBox = document.getElementById("online-hud-race");
     if (!raceBox) return;
+    if (mp.countdownKind === "giveup" && !mp.bestDeclare) {
+      raceBox.textContent = `🏳️ 誰かがギブアップしました。残り${mp.countdownRemaining}秒（誰かが回答すれば中断されます）`;
+      return;
+    }
     if (!mp.bestDeclare) {
       raceBox.textContent = "";
       return;
@@ -440,7 +454,6 @@
   function finalizeMatchOverUI() {
     stopCountdown();
     mp.countdownKind = null;
-    hideGiveUpBanner();
     setControlsLocked(true);
     const giveUpBtn = document.getElementById("btn-online-giveup");
     if (giveUpBtn) giveUpBtn.disabled = true;
@@ -476,7 +489,6 @@
     mp.myGiveUpVoted = false;
     mp.giveUpVoters = new Set();
     mp.countdownKind = null;
-    hideGiveUpBanner();
     setControlsLocked(false);
     const giveUpBtn = document.getElementById("btn-online-giveup");
     if (giveUpBtn) giveUpBtn.disabled = false;
@@ -587,13 +599,21 @@
 
   // seconds: カウントダウンの長さ。onExpire: ホストの権威あるタイマーが
   // 0になった時にだけ呼ばれるコールバック（ゲスト表示専用の場合は省略）。
+  function renderCountdownDisplays() {
+    if (mp.countdownKind === "nextready") {
+      renderNextReadyCountdown();
+    } else {
+      renderRaceStatus();
+    }
+  }
+
   function startCountdown(seconds, onExpire) {
     stopCountdown();
     mp.countdownRemaining = seconds;
-    renderRaceStatus();
+    renderCountdownDisplays();
     mp.countdownInterval = setInterval(() => {
       mp.countdownRemaining--;
-      renderRaceStatus();
+      renderCountdownDisplays();
       if (mp.countdownRemaining <= 0) {
         stopCountdown();
         if (mp.isHost && onExpire) onExpire();
@@ -606,10 +626,10 @@
   function startDisplayCountdown(initialSeconds) {
     stopCountdown();
     mp.countdownRemaining = initialSeconds;
-    renderRaceStatus();
+    renderCountdownDisplays();
     mp.countdownInterval = setInterval(() => {
       mp.countdownRemaining--;
-      renderRaceStatus();
+      renderCountdownDisplays();
       if (mp.countdownRemaining <= 0) {
         stopCountdown();
       }
@@ -706,6 +726,24 @@
     return mp.colors.indexOf(color);
   }
 
+  function showRoundResultBanner(text, callback) {
+    const banner = document.getElementById("round-result-banner");
+    const textEl = banner ? banner.querySelector(".round-result-banner-text") : null;
+    if (!banner || !textEl) {
+      callback();
+      return;
+    }
+    textEl.textContent = text;
+    banner.classList.remove("show");
+    // eslint-disable-next-line no-unused-expressions
+    void banner.offsetWidth; // 連続クリアでもアニメーションを最初からやり直させる
+    banner.classList.add("show");
+    setTimeout(() => {
+      banner.classList.remove("show");
+      callback();
+    }, 2200);
+  }
+
   function applyRoundResult(msg) {
     mp.scores = msg.scores;
     if (msg.roundsPlayed != null) mp.roundsPlayed = msg.roundsPlayed;
@@ -716,11 +754,12 @@
       const topScore = Math.max(...mp.players.map((pl) => mp.scores[pl.peerId] || 0));
       const winner = mp.players.find((pl) => (mp.scores[pl.peerId] || 0) === topScore);
       setStatus(`🎉 ${p ? p.name : "?"} が ${msg.moveCount}手でクリア！ 逆転不可能のため対戦終了 — 優勝: ${winner ? winner.name : "?"}`);
+      renderHud();
     } else {
       setStatus(`🎉 ${p ? p.name : "?"} が ${msg.moveCount}手でクリア！`);
-      awaitNextRoundReady();
+      renderHud();
+      showRoundResultBanner(`${p ? p.name : "?"}さんが1ポイント獲得！`, awaitNextRoundReady);
     }
-    renderHud();
   }
 
   function applyRoundInvalid(msg) {
@@ -738,16 +777,6 @@
   // 「回答する」を押せば通常の回答レースに切り替わり、誰も回答しな
   // ければ60秒後にコンピュータが答えを見せる。
 
-  function showGiveUpBanner() {
-    const banner = document.getElementById("giveup-banner");
-    if (banner) banner.classList.add("show");
-  }
-
-  function hideGiveUpBanner() {
-    const banner = document.getElementById("giveup-banner");
-    if (banner) banner.classList.remove("show");
-  }
-
   function giveUp() {
     if (!mp.currentGoal || mp.myGiveUpVoted || mp.matchOver) return;
     if (mp.countdownKind === "giveup") return; // 既にギブアップ待ち中
@@ -756,6 +785,10 @@
     mp.myGiveUpVoted = true;
     const btn = document.getElementById("btn-online-giveup");
     if (btn) btn.disabled = true;
+    // ギブアップを押した本人の操作だけをロックする（他のプレイヤーは
+    // 引き続き自由に考え続けられる）
+    setControlsLocked(true);
+    renderHud(); // 自分の名前の下に「ギブアップ済み」マークを出す
     const msg = { type: "giveup-vote", peerId: mp.myPeerId };
     if (mp.isHost) {
       applyGiveUpVote(msg);
@@ -776,6 +809,7 @@
   function applyGiveUpVote(msg) {
     if (!mp.isHost) return;
     mp.giveUpVoters.add(msg.peerId);
+    renderHud(); // ホスト自身の画面にもすぐ反映する
 
     if (mp.bestDeclare) {
       const championId = mp.bestDeclare.peerId;
@@ -791,27 +825,36 @@
       }
     } else if (mp.countdownKind === null) {
       applyGiveUpStart(msg);
+    } else if (mp.countdownKind === "giveup") {
+      // 既にギブアップ待ち中に、別の人がさらにギブアップを押した場合も
+      // 「誰がギブアップ済みか」の表示を全員分そろえておく
+      const tally = { type: "giveup-concede-tally", giveUpPeerIds: Array.from(mp.giveUpVoters) };
+      mp.net.broadcast(tally);
+      applyGiveUpConcedeTally(tally);
     }
   }
 
   function applyGiveUpConcedeTally(msg) {
     mp.giveUpVoters = new Set(msg.giveUpPeerIds || []);
     renderRaceStatus();
+    renderHud();
   }
 
   function applyGiveUpStart(msg) {
     if (!mp.isHost || mp.countdownKind !== null) return;
     mp.countdownKind = "giveup";
     startCountdown(GIVEUP_TIMEOUT_SEC, revealGiveUpAnswer);
-    const payload = { type: "giveup-countdown-start", timeLimit: GIVEUP_TIMEOUT_SEC };
+    const payload = { type: "giveup-countdown-start", timeLimit: GIVEUP_TIMEOUT_SEC, giveUpPeerIds: Array.from(mp.giveUpVoters) };
     mp.net.broadcast(payload);
     applyGiveUpCountdownStart(payload);
   }
 
   function applyGiveUpCountdownStart(msg) {
-    showGiveUpBanner();
-    const btn = document.getElementById("btn-online-giveup");
-    if (btn) btn.disabled = true;
+    // 全員に大きなバナーを出したり操作をロックしたりはしない。
+    // 「誰かがギブアップして待っている」ことは online-hud-race の
+    // カウントダウン表示と、各プレイヤーのHUD表示で全員に伝わるようにする。
+    mp.giveUpVoters = new Set(msg.giveUpPeerIds || []);
+    renderHud();
     if (!mp.isHost) {
       startDisplayCountdown(msg.timeLimit);
     }
@@ -819,13 +862,15 @@
 
   // 誰かが回答してギブアップ待ちが打ち切られた場合
   function applyGiveUpCancelled() {
-    hideGiveUpBanner();
+    // ギブアップを押していた本人はロックを解除して再び操作できるようにする
+    // （押していなかった人には影響しない）
+    if (mp.myGiveUpVoted) setControlsLocked(false);
+    renderRaceStatus();
   }
 
   function revealGiveUpAnswer() {
     if (!mp.isHost) return;
     mp.countdownKind = null;
-    hideGiveUpBanner();
     const goalColorIdx = mp.currentGoal.color === "rainbow" ? "any" : colorIndexOfColor(mp.currentGoal.color);
     const solver = new IncrementalSolver(mp.board, mp.roundStartSnapshot, goalColorIdx, mp.currentGoal.r, mp.currentGoal.c, mp.colors);
     let solved = null;
@@ -842,13 +887,12 @@
 
   function applyGiveUpReveal(msg) {
     mp.countdownKind = null;
-    hideGiveUpBanner();
     stopCountdown();
     setControlsLocked(true);
     const path = msg.path || [];
     if (path.length === 0) {
       setStatus("😢 コンピュータでも手順を見つけられませんでした。");
-      awaitNextRoundReady();
+      showRoundResultBanner("引き分け！", awaitNextRoundReady);
       return;
     }
     setStatus(`🤖 コンピュータの最短手順は ${path.length}手 でした。`);
@@ -857,7 +901,7 @@
     let i = 0;
     function step() {
       if (i >= path.length) {
-        awaitNextRoundReady();
+        showRoundResultBanner("引き分け！", awaitNextRoundReady);
         return;
       }
       const s = path[i++];
@@ -908,7 +952,18 @@
     });
   }
 
+  function renderNextReadyCountdown() {
+    const el = document.getElementById("next-ready-countdown");
+    if (!el) return;
+    el.textContent = mp.countdownKind === "nextready" ? `残り${mp.countdownRemaining}秒` : "";
+  }
+
   function awaitNextRoundReady() {
+    if (mp.settings.nextReadyTimeout === "off") {
+      // 準備確認をスキップして、すぐ次の目標へ（実際に進行させるのはホストだけ）
+      if (mp.isHost) nextGoal();
+      return;
+    }
     mp.readyForNext = new Set();
     mp.myReadyForNext = false;
     const overlay = document.getElementById("next-ready-overlay");
@@ -916,11 +971,30 @@
     const btn = document.getElementById("btn-online-next-ready");
     if (btn) btn.disabled = false;
     renderNextReadyPlayerList();
+
+    if (mp.settings.nextReadyTimeout === "unlimited") {
+      mp.countdownKind = null;
+      renderNextReadyCountdown();
+      return;
+    }
+
+    // 全員が押さなくても、設定した時間が経てば自動的に次へ進む
+    const seconds = Number(mp.settings.nextReadyTimeout);
+    mp.countdownKind = "nextready";
+    if (mp.isHost) {
+      startCountdown(seconds, () => {
+        hideNextReadyOverlay();
+        nextGoal();
+      });
+    } else {
+      startDisplayCountdown(seconds);
+    }
   }
 
   function hideNextReadyOverlay() {
     const overlay = document.getElementById("next-ready-overlay");
     if (overlay) overlay.classList.add("hidden");
+    mp.countdownKind = null;
   }
 
   function nextRoundReady() {
@@ -946,6 +1020,7 @@
     mp.net.broadcast(tally);
     applyNextReadyTally(tally);
     if (total > 0 && count >= total) {
+      stopCountdown();
       hideNextReadyOverlay();
       nextGoal();
     }

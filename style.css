@@ -357,28 +357,22 @@ body {
   box-shadow: 0 2px 4px rgba(0,0,0,0.35);
 }
 .robot .face {
+  position: relative;
+  width: 60%;
+  height: 30%;
   display: flex;
-  gap: 12%;
-  margin-bottom: 14%;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12%;
   z-index: 2;
 }
 .robot .eye {
-  position: relative;
-  width: 30%;
-  height: 30%;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #ffffff, #cfe0ff 60%, #7c8fc9 100%);
-  box-shadow: 0 0 6px 1.5px rgba(255,255,255,0.9), 0 1px 2px rgba(0,0,0,0.3);
-}
-.robot .eye::after {
-  content: "";
-  position: absolute;
-  top: 32%;
-  left: 32%;
-  width: 40%;
-  height: 40%;
+  width: 42%;
+  height: 90%;
   border-radius: 50%;
   background: #14182a;
+  border: 1.5px solid rgba(255,255,255,0.75);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
 }
 .robot .mouth {
   position: absolute;
@@ -1362,7 +1356,7 @@ body.title-active { overflow: hidden; }
   align-items: center;
   gap: 6px;
   padding: 4px 11px 4px 4px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text-dim);
@@ -1377,6 +1371,20 @@ body.title-active { overflow: hidden; }
   background: #10141f;
   border-radius: 6px;
   border: 1px solid var(--line);
+}
+.online-hud-chip-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.online-hud-chip-name {
+  white-space: nowrap;
+}
+.online-hud-chip-giveup {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #e0b23f;
 }
 .online-hud-chip.is-host {
   border-color: #5a7fd6;
@@ -1428,6 +1436,14 @@ body.title-active { overflow: hidden; }
   font-size: 1.15rem;
   font-weight: 700;
   color: var(--text);
+}
+.next-ready-countdown {
+  min-height: 1.4em;
+  margin: -8px 0 14px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #e0b23f;
 }
 .next-ready-player-list {
   display: flex;
@@ -1481,7 +1497,7 @@ body.title-active { overflow: hidden; }
 }
 #btn-online-next-ready.hidden { display: none; }
 
-.giveup-banner {
+.round-result-banner {
   position: fixed;
   inset: 0;
   z-index: 920;
@@ -1490,23 +1506,20 @@ body.title-active { overflow: hidden; }
   justify-content: center;
   pointer-events: none;
   opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.3s ease, visibility 0.3s;
 }
-.giveup-banner.show {
-  opacity: 1;
-  visibility: visible;
+.round-result-banner.show {
+  animation: clearBannerPop 2.2s cubic-bezier(.2,.9,.3,1) forwards;
 }
-.giveup-banner-text {
+.round-result-banner-text {
   font-family: "Space Grotesk", sans-serif;
   font-weight: 700;
-  font-size: clamp(1.4rem, 6vw, 2.6rem);
+  font-size: clamp(1.6rem, 7vw, 3rem);
   text-align: center;
   line-height: 1.5;
   color: #fff;
   padding: 0.6em 0.9em;
   max-width: 90vw;
-  text-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 40px rgba(90,127,214,0.6);
+  text-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 40px rgba(75,182,121,0.6);
   background: rgba(16,20,34,0.72);
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 20px;

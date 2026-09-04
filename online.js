@@ -22,6 +22,7 @@
     answerTimeLimit: 60,
     playUntilEnd: true,
     disconnectMode: "wait", // "wait" | "cpu"
+    nextReadyTimeout: 30, // 秒数 | "unlimited"（時間制限なし） | "off"（準備確認自体をしない）
   };
   const WAIT_MODE_TIMEOUT_SEC = 60;
 
@@ -137,6 +138,13 @@
     if (endGroup) {
       const val = room.settings.playUntilEnd ? "on" : "off";
       Array.from(endGroup.children).forEach((btn) => {
+        btn.classList.toggle("selected", btn.dataset.value === val);
+      });
+    }
+    const nextReadyGroup = el("room-setting-nextready");
+    if (nextReadyGroup) {
+      const val = String(room.settings.nextReadyTimeout);
+      Array.from(nextReadyGroup.children).forEach((btn) => {
         btn.classList.toggle("selected", btn.dataset.value === val);
       });
     }
@@ -557,6 +565,7 @@
       ["room-setting-diagonals", "diagonals", (v) => v === "on"],
       ["room-setting-timelimit", "answerTimeLimit", (v) => Number(v)],
       ["room-setting-playuntilend", "playUntilEnd", (v) => v === "on"],
+      ["room-setting-nextready", "nextReadyTimeout", (v) => (v === "unlimited" || v === "off" ? v : Number(v))],
     ].forEach(([groupId, key, transform]) => {
       const group = el(groupId);
       if (!group) return;

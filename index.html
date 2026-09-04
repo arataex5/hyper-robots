@@ -114,6 +114,19 @@
               <button type="button" class="mini-option" data-value="off">決着で終了</button>
             </div>
           </div>
+          <div class="room-setting-row">
+            <div class="room-setting-label-row">
+              <span class="room-setting-label">次の問題への準備確認</span>
+              <span class="setting-help" tabindex="0" data-tooltip="ラウンドが終わってから次の目標が出るまでの間、全員の「準備完了」を待つ時間です。「時間制限なし」は全員が押すまでずっと待ちます。「準備確認無し」にすると、この確認画面自体が出ず、すぐ次の目標が表示されます。">？</span>
+            </div>
+            <div class="room-setting-options" id="room-setting-nextready">
+              <button type="button" class="mini-option" data-value="15">15秒</button>
+              <button type="button" class="mini-option selected" data-value="30">30秒</button>
+              <button type="button" class="mini-option" data-value="60">60秒</button>
+              <button type="button" class="mini-option" data-value="unlimited">時間制限なし</button>
+              <button type="button" class="mini-option" data-value="off">準備確認無し</button>
+            </div>
+          </div>
         </div>
 
         <div class="room-player-list" id="room-player-list"></div>
@@ -164,8 +177,8 @@
   <div class="app">
     <div id="clear-banner" class="clear-banner"></div>
     <div id="disconnect-banner" class="clear-banner disconnect-banner"></div>
-    <div id="giveup-banner" class="giveup-banner">
-      <div class="giveup-banner-text">ほかのプレイヤー全員がギブアップするか、<br>60秒経過するのをお待ちください。</div>
+    <div id="round-result-banner" class="round-result-banner">
+      <div class="round-result-banner-text"></div>
     </div>
 
     <header class="topbar">
@@ -227,6 +240,7 @@
     <div id="next-ready-overlay" class="next-ready-overlay hidden">
       <div class="next-ready-card">
         <h2 class="next-ready-heading">次の問題へ進む準備はいいですか？</h2>
+        <div class="next-ready-countdown" id="next-ready-countdown"></div>
         <div class="next-ready-player-list" id="next-ready-player-list"></div>
         <button id="btn-online-next-ready" class="btn btn-primary">👍 準備完了</button>
       </div>
