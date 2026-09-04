@@ -66,6 +66,7 @@
       countdownKind: null, // null | "declare" | "giveup" -- 今動いているカウントダウンの種類
       countdownInterval: null,
       countdownRemaining: 0,
+      countdownEndTime: 0, // 絶対時刻（ms）。ホストと他プレイヤーの表示がズレないための基準。
       readyForNext: new Set(), // ホスト側のみで使う集計用（次の問題へ進む準備）
       myReadyForNext: false,
       locked: false,
@@ -476,6 +477,22 @@
     return a;
   }
 
+  function showGoalRevealBanner(goal, desc) {
+    const banner = document.getElementById("goal-reveal-banner");
+    const iconBox = document.getElementById("goal-reveal-banner-icon");
+    const textEl = document.getElementById("goal-reveal-banner-text");
+    if (!banner || !iconBox || !textEl) return;
+    iconBox.innerHTML = "";
+    const icon = document.createElement("div");
+    icon.className = `target-icon shape-${goal.shape} tint-${goal.color} active`;
+    iconBox.appendChild(icon);
+    textEl.textContent = desc;
+    banner.classList.remove("show");
+    // eslint-disable-next-line no-unused-expressions
+    void banner.offsetWidth; // 連続でゴールが変わってもアニメーションを最初からやり直させる
+    banner.classList.add("show");
+  }
+
   function applyGoalReveal(goal, robots, goalIndex) {
     mp.isHost = window.HRNet.isHost(); // ホスト引き継ぎが起きていた場合に備えて毎ラウンド再確認する
     updateNewMapButtonForOnline();
@@ -520,6 +537,7 @@
       icon.className = `target-icon shape-${goal.shape} tint-${goal.color} active`;
       goalIconEl.appendChild(icon);
     }
+    showGoalRevealBanner(goal, desc);
     setStatus("新しい目標が現れました。ロボットを動かしてゴールしたら「回答する」で宣言しましょう。");
     renderHud();
     renderRaceStatus();
@@ -584,7 +602,7 @@
         type: "declare-update",
         peerId: msg.peerId,
         moveCount: msg.moveCount,
-        timeLimit: mp.settings.answerTimeLimit,
+        endTime: mp.countdownEndTime,
       };
       mp.net.broadcast(payload);
       if (wasGiveUp) {
@@ -607,33 +625,42 @@
     }
   }
 
+  // 「あと何秒か」は毎回 countdownEndTime（絶対時刻）とのdiffから
+  // 計算し直す。setIntervalの1回ごとの減算に頼ると、タブが非アクティブ
+  // になった時のブラウザのタイマー間引き（スロットリング）などで
+  // ホストと他プレイヤーの表示が少しずつズレていってしまうため。
+  function tickCountdown() {
+    mp.countdownRemaining = Math.max(0, Math.ceil((mp.countdownEndTime - Date.now()) / 1000));
+    renderCountdownDisplays();
+  }
+
   function startCountdown(seconds, onExpire) {
     stopCountdown();
-    mp.countdownRemaining = seconds;
-    renderCountdownDisplays();
+    mp.countdownEndTime = Date.now() + seconds * 1000;
+    tickCountdown();
     mp.countdownInterval = setInterval(() => {
-      mp.countdownRemaining--;
-      renderCountdownDisplays();
-      if (mp.countdownRemaining <= 0) {
+      tickCountdown();
+      if (Date.now() >= mp.countdownEndTime) {
         stopCountdown();
         if (mp.isHost && onExpire) onExpire();
       }
-    }, 1000);
+    }, 300);
   }
 
   // ゲスト側の表示専用カウントダウン。実際の判定・検証要求はホストの
   // カウントダウンだけが行うので、ここでは見た目の秒数を進めるだけ。
-  function startDisplayCountdown(initialSeconds) {
+  // endTime はホストから届いた「絶対時刻」で、ホスト側と同じ基準時刻
+  // から逆算するので、タイマーの間引きなどがあってもズレが蓄積しない。
+  function startDisplayCountdown(endTime) {
     stopCountdown();
-    mp.countdownRemaining = initialSeconds;
-    renderCountdownDisplays();
+    mp.countdownEndTime = endTime;
+    tickCountdown();
     mp.countdownInterval = setInterval(() => {
-      mp.countdownRemaining--;
-      renderCountdownDisplays();
-      if (mp.countdownRemaining <= 0) {
+      tickCountdown();
+      if (Date.now() >= mp.countdownEndTime) {
         stopCountdown();
       }
-    }, 1000);
+    }, 300);
   }
 
   function stopCountdown() {
@@ -844,7 +871,7 @@
     if (!mp.isHost || mp.countdownKind !== null) return;
     mp.countdownKind = "giveup";
     startCountdown(GIVEUP_TIMEOUT_SEC, revealGiveUpAnswer);
-    const payload = { type: "giveup-countdown-start", timeLimit: GIVEUP_TIMEOUT_SEC, giveUpPeerIds: Array.from(mp.giveUpVoters) };
+    const payload = { type: "giveup-countdown-start", endTime: mp.countdownEndTime, giveUpPeerIds: Array.from(mp.giveUpVoters) };
     mp.net.broadcast(payload);
     applyGiveUpCountdownStart(payload);
   }
@@ -856,7 +883,7 @@
     mp.giveUpVoters = new Set(msg.giveUpPeerIds || []);
     renderHud();
     if (!mp.isHost) {
-      startDisplayCountdown(msg.timeLimit);
+      startDisplayCountdown(msg.endTime);
     }
   }
 
@@ -986,9 +1013,11 @@
         hideNextReadyOverlay();
         nextGoal();
       });
-    } else {
-      startDisplayCountdown(seconds);
+      mp.net.broadcast({ type: "nextready-countdown-start", endTime: mp.countdownEndTime });
     }
+    // ゲスト側は、ここでは独立にタイマーを開始しない。ホストからの
+    // nextready-countdown-start メッセージに含まれる絶対時刻を受け取って
+    // から始めることで、ホストとのズレが生まれないようにする。
   }
 
   function hideNextReadyOverlay() {
@@ -1056,9 +1085,9 @@
         applyDeclare(msg);
       } else if (!mp.bestDeclare || msg.moveCount < mp.bestDeclare.moveCount) {
         mp.bestDeclare = { peerId: msg.peerId, moveCount: msg.moveCount };
-        if (msg.timeLimit) {
+        if (msg.endTime) {
           mp.countdownKind = "declare";
-          startDisplayCountdown(msg.timeLimit);
+          startDisplayCountdown(msg.endTime);
         }
         renderRaceStatus();
       }
@@ -1083,6 +1112,8 @@
       if (mp.isHost) applyNextReady(msg);
     } else if (msg.type === "next-ready-tally") {
       applyNextReadyTally(msg);
+    } else if (msg.type === "nextready-countdown-start") {
+      if (!mp.isHost) startDisplayCountdown(msg.endTime);
     } else if (msg.type === "match-over") {
       applyMatchOver(msg);
     }
@@ -1247,5 +1278,6 @@
   // テスト用に内部状態を覗けるようにしておく
   window._HRMultiplayerDebug = {
     getState: () => mp,
+    tickCountdownForTest: () => tickCountdown(),
   };
 })();

@@ -1312,22 +1312,6 @@ body.title-active { overflow: hidden; }
   border-color: #3a9a5f;
 }
 
-.room-disconnect-controls {
-  padding: 10px 12px;
-  margin-bottom: 14px;
-  border: 1px solid var(--c-yellow);
-  border-radius: var(--radius-btn);
-  background: rgba(224, 178, 63, 0.08);
-  text-align: center;
-}
-.room-disconnect-controls.hidden { display: none; }
-.room-disconnect-label {
-  margin: 0 0 10px;
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  line-height: 1.5;
-}
-
 .room-action-row {
   display: flex;
   gap: 10px;
@@ -1520,6 +1504,48 @@ body.title-active { overflow: hidden; }
   padding: 0.6em 0.9em;
   max-width: 90vw;
   text-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 40px rgba(75,182,121,0.6);
+  background: rgba(16,20,34,0.72);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
+}
+
+.goal-reveal-banner {
+  position: fixed;
+  inset: 0;
+  z-index: 915;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  pointer-events: none;
+  opacity: 0;
+}
+.goal-reveal-banner.show {
+  animation: clearBannerPop 1.8s cubic-bezier(.2,.9,.3,1) forwards;
+}
+.goal-reveal-banner-icon {
+  position: relative;
+  width: clamp(90px, 22vw, 160px);
+  height: clamp(90px, 22vw, 160px);
+  flex: none;
+  background: rgba(16,20,34,0.78);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 24px;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.55);
+}
+.goal-reveal-banner-text {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.25rem, 5.2vw, 2.1rem);
+  text-align: center;
+  line-height: 1.5;
+  color: #fff;
+  padding: 0.5em 0.9em;
+  max-width: 90vw;
+  text-shadow: 0 4px 24px rgba(0,0,0,0.55);
   background: rgba(16,20,34,0.72);
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 20px;

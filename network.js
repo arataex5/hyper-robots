@@ -90,31 +90,45 @@
   // ================= PeerJS を使った実際の通信部分 =================
 
   // 参加のたびに変わってしまう PeerJS の peerId とは別に、「同じ人」を
-  // 見分けるための安定した ID。sessionStorage に保存しておくことで、
-  // ページを再読み込みしても（同じタブなら）同じ ID のままになる。
-  function getOrCreateClientId() {
+  // 見分けるためのトークン。参加時にホストが発行し、こちら側は
+  // localStorage にルームIDごとに保存しておく。タブを閉じて開き直しても
+  // （同じ端末・同じブラウザなら）残るので、sessionStorageより再接続に強い。
+  function getStoredToken(roomId) {
     try {
-      let id = window.sessionStorage.getItem("hr-client-id");
-      if (!id) {
-        id = "c-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-        window.sessionStorage.setItem("hr-client-id", id);
-      }
-      return id;
+      return window.localStorage.getItem("hr-token-" + roomId);
     } catch (e) {
-      return "c-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      return null;
     }
+  }
+  function storeToken(roomId, token) {
+    try {
+      window.localStorage.setItem("hr-token-" + roomId, token);
+    } catch (e) {
+      // ストレージが使えない環境でも対戦自体はできるようにしておく
+    }
+  }
+  function generateToken() {
+    return "t-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
 
   function createNetwork() {
     const emitter = createEmitter();
-    const myClientId = getOrCreateClientId();
     let peer = null;
     let myPeerId = null;
     let myJoinOrder = 0;
     let roomId = null;
     let hostPeerId = null; // 現在のホストの peerId
-    // peers: peerId -> { peerId, profile, joinOrder, connected, conn(DataConnection|null), isCpu, clientId }
+    let nextJoinOrder = 1; // ホスト側でのみ使う、参加順の採番カウンタ（減ることはない）
+    // peers: peerId -> { peerId, profile, joinOrder, connected, conn(DataConnection|null), isCpu, token }
     const peers = new Map();
+
+    function findPeerByToken(token) {
+      if (!token) return null;
+      for (const p of peers.values()) {
+        if (p.token === token) return p;
+      }
+      return null;
+    }
 
     function peerListArray() {
       return Array.from(peers.values()).map((p) => ({
@@ -123,7 +137,7 @@
         joinOrder: p.joinOrder,
         connected: p.connected,
         isCpu: !!p.isCpu,
-        clientId: p.clientId || null,
+        token: p.token || null,
       }));
     }
 
@@ -181,7 +195,7 @@
             connectTo(p.peerId);
           }
         });
-        emitter.emit("room-joined", { peerList: peerListArray(), hostPeerId });
+        emitter.emit("room-joined", { peerList: peerListArray(), hostPeerId, yourToken: msg.yourToken });
       } else if (msg.type === "peer-joined") {
         const p = msg.peer;
         if (p.peerId === myPeerId) return;
@@ -203,11 +217,9 @@
         // ゲーム本体（online.js）向けのメッセージはそのまま上に流す
         emitter.emit("app-message", { from: fromPeerId, payload: msg.payload });
       } else if (msg.type === "hello") {
-        // 参加者が自分のプロフィールを教えてくれた。記録して知らせる
-        // （これがないと、参加者のプロフィール名・アイコンが相手に一切伝わらない）
+        // 参加者が自分のプロフィールを教えてくれた（接続時のmetadataで
+        // 既に伝わっているはずだが、念のためのフォールバックとして残す）。
         setPeerProfile(fromPeerId, msg.profile);
-        const p = peers.get(fromPeerId);
-        if (p) p.clientId = msg.clientId || null;
         emitter.emit("peer-list-changed", peerListArray());
       }
     }
@@ -229,13 +241,26 @@
       }
     }
 
-    function wireConnection(conn, remoteJoinOrder, remoteProfile) {
+    function wireConnection(conn, remoteJoinOrder, remoteProfile, remoteToken) {
+      // 同じトークンを持つ既存エントリ（切断中のはず）があれば、それを
+      // 新しい peerId に「引き継ぐ」形にする。古いキーのエントリをここで
+      // 消しておかないと、再接続のたびにpeers Mapが増え続けてしまう。
+      if (remoteToken) {
+        for (const [oldPeerId, p] of peers.entries()) {
+          if (p.token === remoteToken && oldPeerId !== conn.peer) {
+            peers.delete(oldPeerId);
+            break;
+          }
+        }
+      }
       conn.on("open", () => {
         const existing = peers.get(conn.peer);
         if (existing) {
           existing.conn = conn;
           existing.connected = true;
           existing.connecting = false;
+          if (remoteProfile) existing.profile = remoteProfile;
+          if (remoteToken) existing.token = remoteToken;
         } else {
           peers.set(conn.peer, {
             peerId: conn.peer,
@@ -245,6 +270,7 @@
             conn,
             isCpu: false,
             connecting: false,
+            token: remoteToken || null,
           });
         }
         emitter.emit("peer-connected", conn.peer);
@@ -311,29 +337,37 @@
       myJoinOrder = 0;
 
       peer.on("connection", (conn) => {
-        const joinOrder = peers.size + 1;
+        // conn.metadata は接続が確立する前（"open"を待たず）から同期的に
+        // 読める。ここで「再接続かどうか」を判定してしまうことで、
+        // "hello"メッセージの到着タイミングに左右されなくなる。
+        const presentedToken = (conn.metadata && conn.metadata.token) || null;
+        const presentedProfile = (conn.metadata && conn.metadata.profile) || null;
+        const existingPeer = findPeerByToken(presentedToken);
+        const joinOrder = existingPeer ? existingPeer.joinOrder : nextJoinOrder++;
+        const assignedToken = existingPeer ? existingPeer.token : generateToken();
         // wireConnection が自前で conn.on("open", ...) を登録するので、
         // 「open」がまだ発火していないこのタイミング（connectionイベント
         // ハンドラの同期処理内）で呼ぶ必要がある。open発火後にネストして
         // 呼ぶと、その回のopenイベントを取りこぼしてしまう。
-        wireConnection(conn, joinOrder, null);
+        wireConnection(conn, joinOrder, presentedProfile, assignedToken);
         conn.on("open", () => {
           const p = peers.get(conn.peer);
-          if (p) p.joinOrder = joinOrder;
+          if (p) { p.joinOrder = joinOrder; p.token = assignedToken; }
           // 新規参加者に、既存ピア一覧（自分含む）を送る
           const list = peerListArray()
             .filter((x) => x.peerId !== conn.peer)
-            .concat([{ peerId: myPeerId, profile: myProfile, joinOrder: 0, connected: true, isCpu: false, clientId: myClientId }]);
+            .concat([{ peerId: myPeerId, profile: myProfile, joinOrder: 0, connected: true, isCpu: false }]);
           conn.send(
             JSON.stringify({
               type: "welcome",
               hostPeerId: myPeerId,
               peerList: list,
               you: { joinOrder },
+              yourToken: assignedToken,
             })
           );
           // 既存メンバーに新規参加を告知（各自が必要なら接続しにいく）
-          broadcast({ type: "peer-joined", peer: { peerId: conn.peer, profile: null, joinOrder, connected: true } }, conn.peer);
+          broadcast({ type: "peer-joined", peer: { peerId: conn.peer, profile: presentedProfile, joinOrder, connected: true } }, conn.peer);
           emitter.emit("peer-list-changed", peerListArray());
         });
       });
@@ -351,6 +385,7 @@
         throw new Error("ルームIDは5桁の数字で入力してください。");
       }
       const targetPeerId = roomIdToPeerId(inputRoomId);
+      const existingToken = getStoredToken(inputRoomId); // このルームに前に参加していれば、その時のトークン
       peer = await createPeerWithRetry(null, 0).catch(() => {
         return new Promise((resolve, reject) => {
           const p = new window.Peer();
@@ -369,7 +404,7 @@
       });
 
       return new Promise((resolve, reject) => {
-        const conn = peer.connect(targetPeerId, { reliable: true, metadata: { profile: myProfile } });
+        const conn = peer.connect(targetPeerId, { reliable: true, metadata: { profile: myProfile, token: existingToken } });
         // hostRoom() 側と同じ理由で、wireConnection は open がまだ発火して
         // いない今のタイミング（connect() 呼び出し直後の同期処理）で呼ぶ。
         // データの受信処理は wireConnection が内部で一度だけ登録するので、
@@ -379,13 +414,17 @@
         wireConnection(conn);
         let settled = false;
         conn.on("open", () => {
-          conn.send(JSON.stringify({ type: "hello", profile: myProfile, clientId: myClientId }));
+          // プロフィール・トークンは接続時のmetadataで既に伝わっているはず
+          // だが、念のためのフォールバックとして送っておく。
+          conn.send(JSON.stringify({ type: "hello", profile: myProfile, token: existingToken }));
         });
         emitter.on("room-joined", function onJoined(info) {
           if (settled) return;
           settled = true;
           emitter.off("room-joined", onJoined);
           hostPeerId = info.hostPeerId;
+          // ホストが発行してくれたトークンを保存しておく（次に再接続する時に提示する）
+          if (info.yourToken) storeToken(inputRoomId, info.yourToken);
           resolve({ roomId, peerId: myPeerId, hostPeerId });
         });
         conn.on("error", (err) => {
@@ -461,7 +500,6 @@
       getHostPeerId: () => hostPeerId,
       getPeerList: peerListArray,
       getMyJoinOrder: () => myJoinOrder,
-      getMyClientId: () => myClientId,
     };
   }
 

@@ -3,7 +3,7 @@
  * ------------------------------------------------------------
  * network.js（P2P通信）の上に乗る「アプリケーション層」です。
  * ロビー画面・ルーム画面のUI、ルーム設定・プレイヤー一覧・準備完了/
- * ゲーム開始の流れ、切断時のホスト自動引き継ぎとCPU代打ち、そして
+ * ゲーム開始の流れ、切断時のホスト自動引き継ぎと再接続、そして
  * 実際の対戦（同時に最短手を考え、宣言し合い、検証する）ラウンドの
  * 進行を管理します。
  *
@@ -21,15 +21,12 @@
     diagonals: false,
     answerTimeLimit: 60,
     playUntilEnd: true,
-    disconnectMode: "wait", // "wait" | "cpu"
     nextReadyTimeout: 30, // 秒数 | "unlimited"（時間制限なし） | "off"（準備確認自体をしない）
   };
-  const WAIT_MODE_TIMEOUT_SEC = 60;
 
   let room = null; // { roomId, roomName, hostPeerId, settings, players: [...], phase }
   let myPeerId = null;
   let iAmHost = false;
-  let waitTimers = {}; // peerId -> intervalId（プレイヤー待機モードの60秒カウント）
 
   // ================= ユーティリティ =================
 
@@ -71,7 +68,6 @@
           joinOrder: 0,
           name: hostProfile.name,
           profile: hostProfile,
-          clientId: window.HRNet.getMyClientId(),
           ready: false,
           connected: true,
           isCpu: false,
@@ -102,7 +98,6 @@
 
     renderSettingsPanel();
     renderPlayerList();
-    renderDisconnectControls();
     renderActionButtons();
   }
 
@@ -169,8 +164,7 @@
       nameSpan.className = "room-player-name";
       nameSpan.textContent = p.name || defaultPlayerName(p.joinOrder);
       if (p.peerId === room.hostPeerId) nameSpan.textContent += "（ホスト）";
-      if (p.isCpu) nameSpan.textContent += "［CPU代打ち］";
-      if (!p.connected && !p.isCpu) nameSpan.textContent += "［切断中］";
+      if (!p.connected) nameSpan.textContent += "［切断中］";
       row.appendChild(nameSpan);
 
       const readyBadge = document.createElement("span");
@@ -181,24 +175,6 @@
 
       list.appendChild(row);
     });
-  }
-
-  function renderDisconnectControls() {
-    const box = el("room-disconnect-controls");
-    if (!box) return;
-    const anyDisconnected = room.players.some((p) => !p.connected && p.peerId !== myPeerId);
-    box.classList.toggle("hidden", !(iAmHost && anyDisconnected));
-    if (!(iAmHost && anyDisconnected)) return;
-
-    const label = el("room-disconnect-label");
-    const toggleBtn = el("btn-disconnect-mode-toggle");
-    if (room.settings.disconnectMode === "wait") {
-      if (label) label.textContent = "切断中のプレイヤーがいます。プレイヤー待機モード中（60秒待って戻らなければCPUが代打ちします）。";
-      if (toggleBtn) toggleBtn.textContent = "CPU代打ちモードに切り替え";
-    } else {
-      if (label) label.textContent = "切断中のプレイヤーがいます。CPU代打ちモード中です。";
-      if (toggleBtn) toggleBtn.textContent = "プレイヤー待機モードに切り替え";
-    }
   }
 
   function renderActionButtons() {
@@ -245,6 +221,7 @@
       msg.type === "giveup-reveal" ||
       msg.type === "next-ready" ||
       msg.type === "next-ready-tally" ||
+      msg.type === "nextready-countdown-start" ||
       msg.type === "match-over"
     ) {
       handleGameMessage(msg);
@@ -295,8 +272,6 @@
     window.HRNet.leaveRoom();
     room = null;
     iAmHost = false;
-    Object.values(waitTimers).forEach((t) => clearInterval(t));
-    waitTimers = {};
   }
 
   function toggleMyReady() {
@@ -317,23 +292,10 @@
     broadcastRoomState();
   }
 
-  function toggleDisconnectMode() {
-    if (!room || !iAmHost) return;
-    room.settings.disconnectMode = room.settings.disconnectMode === "wait" ? "cpu" : "wait";
-    if (room.settings.disconnectMode === "cpu") {
-      // 切断中の全員をその場でCPU代打ちに切り替える
-      room.players.forEach((p) => {
-        if (!p.connected) p.isCpu = true;
-      });
-      Object.values(waitTimers).forEach((t) => clearInterval(t));
-      waitTimers = {};
-    }
-    broadcastRoomState();
-  }
 
   function allNonHostReady() {
     if (!room) return false;
-    const others = room.players.filter((p) => p.peerId !== room.hostPeerId && p.connected && !p.isCpu);
+    const others = room.players.filter((p) => p.peerId !== room.hostPeerId && p.connected);
     return others.length > 0 && others.every((p) => p.ready);
   }
 
@@ -392,13 +354,6 @@
   // ================= 切断・ホスト引き継ぎへの対応 =================
 
   function mergeGhostInto(target, oldPeerId) {
-    // 待機タイマーは切断時点の（古い）peerIdで登録されているので、
-    // そちらを使って止める（新しいpeerIdでは見つからず残り続けてしまう）
-    if (waitTimers[oldPeerId]) {
-      clearInterval(waitTimers[oldPeerId]);
-      delete waitTimers[oldPeerId];
-    }
-    target.isCpu = false;
     if (typeof window.remapOnlinePlayerId === "function") {
       window.remapOnlinePlayerId(oldPeerId, target.peerId);
     }
@@ -416,26 +371,26 @@
           p.profile = netP.profile;
           p.name = netP.profile.name;
         }
-        if (netP.clientId && !p.clientId) {
-          p.clientId = netP.clientId;
-          // clientIdが後から分かった時点で、同じclientIdを持つ「切断中」の
+        if (netP.token && !p.token) {
+          p.token = netP.token;
+          // tokenが後から分かった時点で、同じtokenを持つ「切断中」の
           // 別エントリ（＝先に接続イベントだけ処理されて出来た別人扱いの
           // ゴースト）が無いか確認し、あれば統合する。
-          const ghost = room.players.find((pl) => pl !== p && pl.clientId === netP.clientId && !pl.connected);
+          const ghost = room.players.find((pl) => pl !== p && pl.token === netP.token && !pl.connected);
           if (ghost) {
             const oldPeerId = ghost.peerId;
             room.players = room.players.filter((pl) => pl !== ghost);
             mergeGhostInto(p, oldPeerId);
           }
         }
-        if (wasConnected && !p.connected) onPlayerDisconnected(p);
-        if (!wasConnected && p.connected) onPlayerReconnected(p);
+        // 切断・復帰しても特別なモード切り替えは行わない。無操作のまま
+        // 置いておくだけで、戻ってくれば通常通り操作を再開できる。
       } else if (netP.connected) {
-        // 同じ clientId を持つ「切断中」のプレイヤーがいれば、新規参加では
+        // 同じ token を持つ「切断中」のプレイヤーがいれば、新規参加では
         // なく本人の再接続として扱う（PeerJSは参加のたびに新しいpeerIdを
-        // 振るため、clientIdで見分けないと毎回「別人」に見えてしまう）
-        const ghost = netP.clientId
-          ? room.players.find((pl) => pl.clientId && pl.clientId === netP.clientId && !pl.connected)
+        // 振るため、tokenで見分けないと毎回「別人」に見えてしまう）
+        const ghost = netP.token
+          ? room.players.find((pl) => pl.token && pl.token === netP.token && !pl.connected)
           : null;
         if (ghost) {
           const oldPeerId = ghost.peerId;
@@ -454,7 +409,7 @@
             joinOrder: netP.joinOrder,
             name: (netP.profile && netP.profile.name) || defaultPlayerName(netP.joinOrder),
             profile: netP.profile,
-            clientId: netP.clientId || null,
+            token: netP.token || null,
             ready: false,
             connected: true,
             isCpu: false,
@@ -465,36 +420,6 @@
     });
     if (iAmHost) broadcastRoomState();
     else renderRoom();
-  }
-
-  function onPlayerDisconnected(p) {
-    if (!iAmHost || !room) return;
-    if (room.settings.disconnectMode === "cpu") {
-      p.isCpu = true;
-      return;
-    }
-    // プレイヤー待機モード：60秒待って戻らなければCPU代打ちにする
-    if (waitTimers[p.peerId]) clearInterval(waitTimers[p.peerId]);
-    let remaining = WAIT_MODE_TIMEOUT_SEC;
-    waitTimers[p.peerId] = setInterval(() => {
-      remaining--;
-      if (remaining <= 0 || p.connected) {
-        clearInterval(waitTimers[p.peerId]);
-        delete waitTimers[p.peerId];
-        if (!p.connected) {
-          p.isCpu = true;
-          broadcastRoomState();
-        }
-      }
-    }, 1000);
-  }
-
-  function onPlayerReconnected(p) {
-    if (waitTimers[p.peerId]) {
-      clearInterval(waitTimers[p.peerId]);
-      delete waitTimers[p.peerId];
-    }
-    p.isCpu = false;
   }
 
   function onHostChanged(newHostPeerId) {
@@ -581,8 +506,6 @@
     if (readyBtn) readyBtn.addEventListener("click", toggleMyReady);
     const startBtn = el("btn-room-start");
     if (startBtn) startBtn.addEventListener("click", startGameFromRoom);
-    const disconnectToggleBtn = el("btn-disconnect-mode-toggle");
-    if (disconnectToggleBtn) disconnectToggleBtn.addEventListener("click", toggleDisconnectMode);
   }
 
   if (document.readyState === "loading") {
