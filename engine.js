@@ -445,15 +445,11 @@ function generateDiagonals(targets, colorPalette) {
 
 // options: { useDiagonals: boolean, colors: string[] } — colors は斜め壁に
 // 使ってよい色のパレット（4色/5色モードに応じて呼び出し側が渡す）。
-function generateBoard(options) {
-  const opts = options || {};
-  // 「距離に関係なく同じ軸のL字を判定する」チェックが加わり、有効な盤面に
-  // たどり着くまでの試行回数が大きく増えたため、上限も引き上げてある
-  // （実測: 平均300〜400回程度、1回あたり1ミリ秒未満なので体感の遅延はない）。
-  let candidate = buildCandidateBoard();
-  for (let attempt = 0; attempt < 5000 && !candidate.valid; attempt++) {
-    candidate = buildCandidateBoard();
-  }
+// テスト等、同期的な呼び出しで問題ない場面向け。時間の許す限り（最大
+// GENERATE_TIME_BUDGET_MS）リトライし続け、有効な盤面を探す。
+const GENERATE_TIME_BUDGET_MS = 5000;
+
+function finalizeBoard(candidate, opts) {
   const diagonals = opts.useDiagonals
     ? generateDiagonals(candidate.targets, opts.colors || COLORS)
     : new Map();
@@ -463,6 +459,43 @@ function generateBoard(options) {
     blocked: candidate.blocked,
     targets: candidate.targets,
     diagonals,
+  };
+}
+
+function generateBoard(options) {
+  const opts = options || {};
+  const deadline = Date.now() + GENERATE_TIME_BUDGET_MS;
+  let candidate = buildCandidateBoard();
+  while (!candidate.valid && Date.now() < deadline) {
+    candidate = buildCandidateBoard();
+  }
+  return finalizeBoard(candidate, opts);
+}
+
+// UIをフリーズさせずに盤面生成するための、中断・再開可能なバージョン。
+// IncrementalSolverと同じ考え方で、step(budgetMs)を setTimeout 越しに
+// 繰り返し呼び出すことで、ブラウザに描画の機会を与えながら探索を進める。
+// 「マップ生成中」の表示を出している間にこれを使う。
+function createIncrementalBoardGenerator(options) {
+  const opts = options || {};
+  const deadline = Date.now() + GENERATE_TIME_BUDGET_MS;
+  let done = false;
+  let result = null;
+  return {
+    step(budgetMs) {
+      if (done) return { status: "done", board: result };
+      const stepDeadline = Date.now() + (budgetMs || 20);
+      let candidate = buildCandidateBoard();
+      while (!candidate.valid && Date.now() < stepDeadline && Date.now() < deadline) {
+        candidate = buildCandidateBoard();
+      }
+      if (candidate.valid || Date.now() >= deadline) {
+        done = true;
+        result = finalizeBoard(candidate, opts);
+        return { status: "done", board: result };
+      }
+      return { status: "continue" };
+    },
   };
 }
 

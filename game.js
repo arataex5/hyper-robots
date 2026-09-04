@@ -725,6 +725,18 @@
     return placed;
   }
 
+  function showMapGenOverlay() {
+    const el = document.getElementById("mapgen-overlay");
+    if (el) el.classList.remove("hidden");
+  }
+
+  function hideMapGenOverlay() {
+    const el = document.getElementById("mapgen-overlay");
+    if (el) el.classList.add("hidden");
+  }
+  window.showMapGenOverlay = showMapGenOverlay;
+  window.hideMapGenOverlay = hideMapGenOverlay;
+
   function newMap() {
     if (checkPollTimer) {
       clearInterval(checkPollTimer);
@@ -736,20 +748,32 @@
     }
     hideThinkingOverlay();
     solverStatus = "idle";
-    locked = false;
+    locked = true; // 盤面生成中は操作をロックしておく
     selectedRobot = null;
     btnNext.disabled = false;
 
-    board = generateBoard({ useDiagonals: USE_DIAGONALS, colors: ACTIVE_COLORS });
-    robots = placeRobotsRandomly();
-    targetQueue = shuffleArrayLocal(board.targets);
-    totalGoals = targetQueue.length;
-    gameOver = false;
-    goalIndex = -1;
+    showMapGenOverlay();
+    const generator = createIncrementalBoardGenerator({ useDiagonals: USE_DIAGONALS, colors: ACTIVE_COLORS });
+    function step() {
+      const res = generator.step(20);
+      if (res.status === "done") {
+        hideMapGenOverlay();
+        board = res.board;
+        robots = placeRobotsRandomly();
+        targetQueue = shuffleArrayLocal(board.targets);
+        totalGoals = targetQueue.length;
+        gameOver = false;
+        goalIndex = -1;
+        locked = false;
 
-    renderBoardStatic();
-    renderRobots();
-    nextGoal();
+        renderBoardStatic();
+        renderRobots();
+        nextGoal();
+      } else {
+        setTimeout(step, 0);
+      }
+    }
+    step();
   }
 
   // ---------- wire up buttons ----------

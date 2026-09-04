@@ -690,11 +690,19 @@
   }
 
   function submitVerification() {
-    mp.net.broadcast({
+    const msg = {
       type: "verify-submit",
       peerId: mp.myPeerId,
       moves: mp.myDeclaredMoves || [],
-    });
+    };
+    if (mp.isHost) {
+      // broadcastは送信者自身には届かない仕組みなので、提出者がホスト
+      // 自身（＝ホストがチャンピオン）の場合はここで直接処理する。
+      // でないと検証がいつまでも走らず、対局が進行不能になってしまう。
+      verifySubmission(msg);
+    } else {
+      mp.net.broadcast(msg);
+    }
   }
 
   // ホスト側: 提出された手順を、ラウンド開始時点の盤面で再生して検証する
@@ -817,15 +825,11 @@
 
   function giveUp() {
     if (!mp.currentGoal || mp.myGiveUpVoted || mp.matchOver) return;
-    if (mp.countdownKind === "giveup") return; // 既にギブアップ待ち中
     // チャンピオン自身は「自分に降参する」ことはできない
     if (mp.bestDeclare && mp.bestDeclare.peerId === mp.myPeerId) return;
     mp.myGiveUpVoted = true;
     const btn = document.getElementById("btn-online-giveup");
     if (btn) btn.disabled = true;
-    // ギブアップを押した本人の操作だけをロックする（他のプレイヤーは
-    // 引き続き自由に考え続けられる）
-    setControlsLocked(true);
     renderHud(); // 自分の名前の下に「ギブアップ済み」マークを出す
     const msg = { type: "giveup-vote", peerId: mp.myPeerId };
     if (mp.isHost) {
@@ -864,11 +868,18 @@
     } else if (mp.countdownKind === null) {
       applyGiveUpStart(msg);
     } else if (mp.countdownKind === "giveup") {
-      // 既にギブアップ待ち中に、別の人がさらにギブアップを押した場合も
-      // 「誰がギブアップ済みか」の表示を全員分そろえておく
+      // 既にギブアップ待ち中に、別の人がさらにギブアップを押した場合。
+      // 全員分がそろったら、60秒を待たずに今すぐ答えを見せる。
+      const active = activePeerIds();
+      const total = active.length;
+      const count = active.filter((id) => mp.giveUpVoters.has(id)).length;
       const tally = { type: "giveup-concede-tally", giveUpPeerIds: Array.from(mp.giveUpVoters) };
       mp.net.broadcast(tally);
       applyGiveUpConcedeTally(tally);
+      if (total > 0 && count >= total) {
+        stopCountdown();
+        revealGiveUpAnswer();
+      }
     }
   }
 
@@ -1140,19 +1151,30 @@
     if (!mp.isHost) return;
     const ok = window.confirm("新しいマップを生成すると、現在のゲーム内容（得点・進行状況）はリセットされます。よろしいですか？");
     if (!ok) return;
-    const board = window.generateBoard({ useDiagonals: mp.settings.diagonals, colors: mp.colors });
-    const targetQueue = shuffle(board.targets);
-    const payload = {
-      type: "start-game",
-      board: window.HROnline.serializeBoard(board),
-      colorMode: mp.settings.colorMode,
-      diagonals: mp.settings.diagonals,
-      targetOrder: targetQueue,
-      settings: mp.settings,
-      players: mp.players,
-    };
-    mp.net.broadcast(payload);
-    applyStartGamePayload(payload);
+    if (typeof window.showMapGenOverlay === "function") window.showMapGenOverlay();
+    const generator = window.createIncrementalBoardGenerator({ useDiagonals: mp.settings.diagonals, colors: mp.colors });
+    function step() {
+      const res = generator.step(20);
+      if (res.status !== "done") {
+        setTimeout(step, 0);
+        return;
+      }
+      if (typeof window.hideMapGenOverlay === "function") window.hideMapGenOverlay();
+      const board = res.board;
+      const targetQueue = shuffle(board.targets);
+      const payload = {
+        type: "start-game",
+        board: window.HROnline.serializeBoard(board),
+        colorMode: mp.settings.colorMode,
+        diagonals: mp.settings.diagonals,
+        targetOrder: targetQueue,
+        settings: mp.settings,
+        players: mp.players,
+      };
+      mp.net.broadcast(payload);
+      applyStartGamePayload(payload);
+    }
+    step();
   }
 
   function deserializeBoardLocal(data) {

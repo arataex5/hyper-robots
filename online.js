@@ -306,20 +306,31 @@
       return;
     }
     const colors = room.settings.colorMode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
-    const board = window.generateBoard({ useDiagonals: room.settings.diagonals, colors });
-    const targetQueue = shuffleArray(board.targets);
-    const payload = {
-      type: "start-game",
-      board: serializeBoard(board),
-      colorMode: room.settings.colorMode,
-      diagonals: room.settings.diagonals,
-      targetOrder: targetQueue,
-      settings: room.settings,
-      players: room.players,
-    };
-    room.phase = "in-game";
-    window.HRNet.broadcastApp(payload);
-    beginOnlineGame(payload);
+    if (typeof window.showMapGenOverlay === "function") window.showMapGenOverlay();
+    const generator = window.createIncrementalBoardGenerator({ useDiagonals: room.settings.diagonals, colors });
+    function step() {
+      const res = generator.step(20);
+      if (res.status !== "done") {
+        setTimeout(step, 0);
+        return;
+      }
+      if (typeof window.hideMapGenOverlay === "function") window.hideMapGenOverlay();
+      const board = res.board;
+      const targetQueue = shuffleArray(board.targets);
+      const payload = {
+        type: "start-game",
+        board: serializeBoard(board),
+        colorMode: room.settings.colorMode,
+        diagonals: room.settings.diagonals,
+        targetOrder: targetQueue,
+        settings: room.settings,
+        players: room.players,
+      };
+      room.phase = "in-game";
+      window.HRNet.broadcastApp(payload);
+      beginOnlineGame(payload);
+    }
+    step();
   }
 
   function shuffleArray(arr) {
