@@ -283,9 +283,11 @@
     mp.moveHistory.push({ robot: idx, dir, from, to, bends: result.bends || [] });
     mp.historyIndex++;
 
+    // 動き始める前に一度矢印を消す。アニメーション完了後まで残していると、
+    // ロボットが離れた後も元の位置に矢印が居座っているように見えてしまう。
+    clearArrows();
     animateAlongPath(idx, [...(result.bends || []), to], () => {
       updateMoveCount();
-      clearArrows();
       if (mp.selectedRobot === idx) showArrowsForRobot(idx);
     });
   }
@@ -326,6 +328,7 @@
     const entry = mp.moveHistory[mp.historyIndex - 1];
     mp.historyIndex--;
     const reversed = entry.bends.slice().reverse().concat([entry.from]);
+    clearArrows();
     animateAlongPath(entry.robot, reversed, () => {
       updateMoveCount();
       if (mp.selectedRobot === entry.robot) showArrowsForRobot(entry.robot);
@@ -336,6 +339,7 @@
     if (mp.locked || mp.historyIndex >= mp.moveHistory.length) return;
     const entry = mp.moveHistory[mp.historyIndex];
     mp.historyIndex++;
+    clearArrows();
     animateAlongPath(entry.robot, [...entry.bends, entry.to], () => {
       updateMoveCount();
       if (mp.selectedRobot === entry.robot) showArrowsForRobot(entry.robot);
@@ -1074,7 +1078,7 @@
     if (!banner || !mp) return;
     const p = mp.players.find((x) => x.peerId === peerId);
     const name = p ? p.name || "プレイヤー" : "プレイヤー";
-    banner.innerHTML = `<div class="clear-banner-text">${name}さんが<span class="clear-banner-sub">切断されました</span></div>`;
+    banner.innerHTML = `<div class="clear-banner-text"><span class="clear-banner-text-inner">${name}さんが<span class="clear-banner-sub">切断されました</span></span></div>`;
     banner.classList.remove("show");
     // eslint-disable-next-line no-unused-expressions
     void banner.offsetWidth;

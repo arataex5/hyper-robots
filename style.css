@@ -316,6 +316,52 @@ body {
   50% { transform: translateX(22%); }
 }
 
+/* 答え合わせで計算に時間がかかっている時だけ出す、大きめの「思考中...」表示 */
+.thinking-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 917;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.thinking-overlay.hidden { display: none; }
+.thinking-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 40px;
+  background: rgba(16,20,34,0.82);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 22px;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.thinking-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255,255,255,0.2);
+  border-top-color: #9fb0e8;
+  border-radius: 50%;
+  animation: thinkingSpin 0.8s linear infinite;
+}
+@keyframes thinkingSpin {
+  to { transform: rotate(360deg); }
+}
+.thinking-text {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: #fff;
+  letter-spacing: 0.05em;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-spinner { animation: none !important; }
+}
+
 /* reactor core in the center 2x2 — a solid, permanently blocked area.
    Kept static on purpose (no glow/pulse animation). */
 .core {
@@ -761,12 +807,20 @@ body.title-active { overflow: hidden; }
 }
 .clear-banner .clear-banner-text {
   font-family: "Space Grotesk", sans-serif;
+  text-align: center;
+  padding: 0.4em 0.7em;
+  max-width: 90vw;
+  background: rgba(16,20,34,0.72);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
+}
+.clear-banner .clear-banner-text-inner {
+  display: block;
   font-weight: 700;
   font-size: clamp(2.4rem, 12vw, 5rem);
-  text-align: center;
   line-height: 1.15;
   color: #fff;
-  padding: 0.3em 0.5em;
   text-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 40px rgba(107,122,184,0.6);
   background: linear-gradient(90deg, #eef1f8, #9fb0e8);
   -webkit-background-clip: text;
@@ -796,7 +850,7 @@ body.title-active { overflow: hidden; }
 .disconnect-banner.show {
   animation: clearBannerPop 3.2s cubic-bezier(.2,.9,.3,1) forwards;
 }
-.disconnect-banner .clear-banner-text {
+.disconnect-banner .clear-banner-text-inner {
   background: linear-gradient(90deg, #ffe3d9, #ff9e7a);
   -webkit-background-clip: text;
   background-clip: text;

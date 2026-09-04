@@ -59,6 +59,7 @@
   let solverDeadline = 0;
   let solverStartSnapshot = null;
   let checkPollTimer = null;
+  let thinkingShowTimer = null;
 
   // ---------- helpers ----------
   function cloneRobots(list) {
@@ -417,6 +418,11 @@
       clearInterval(checkPollTimer);
       checkPollTimer = null;
     }
+    if (thinkingShowTimer) {
+      clearTimeout(thinkingShowTimer);
+      thinkingShowTimer = null;
+    }
+    hideThinkingOverlay();
 
     locked = true;
     robots = cloneRobots(solverStartSnapshot);
@@ -449,7 +455,7 @@
   let clearBannerTimer = null;
   function showClearBanner(moves) {
     if (!clearBannerEl) return;
-    clearBannerEl.innerHTML = `<div class="clear-banner-text">${moves}手でゴール！<span class="clear-banner-sub">🎉 クリア！</span></div>`;
+    clearBannerEl.innerHTML = `<div class="clear-banner-text"><span class="clear-banner-text-inner">${moves}手でゴール！<span class="clear-banner-sub">🎉 クリア！</span></span></div>`;
     // クラスを一度外してから付け直すことで、連続クリア時もアニメーションを
     // 最初からやり直させる。
     clearBannerEl.classList.remove("show");
@@ -501,6 +507,16 @@
     }, 0);
   }
 
+  function showThinkingOverlay() {
+    const el = document.getElementById("thinking-overlay");
+    if (el) el.classList.remove("hidden");
+  }
+
+  function hideThinkingOverlay() {
+    const el = document.getElementById("thinking-overlay");
+    if (el) el.classList.add("hidden");
+  }
+
   function onCheckClick() {
     if (locked || gameOver || roundState.answerRevealed) return;
     btnCheck.disabled = true;
@@ -516,16 +532,25 @@
     }
 
     setStatus("🤖 コンピュータが思考中です。しばらくお待ちください…", "info");
+    // 一瞬で見つかる場合にまで毎回でかでかと表示すると煩わしいので、
+    // 少し待っても終わらない時だけ大きな「思考中...」を出す。
+    if (thinkingShowTimer) clearTimeout(thinkingShowTimer);
+    thinkingShowTimer = setTimeout(() => {
+      thinkingShowTimer = null;
+      if (solverStatus === "searching") showThinkingOverlay();
+    }, 450);
     if (checkPollTimer) clearInterval(checkPollTimer);
     checkPollTimer = setInterval(() => {
       if (solverStatus === "found") {
         clearInterval(checkPollTimer);
         checkPollTimer = null;
+        hideThinkingOverlay();
         revealAnswer(solverPath);
       } else if (solverStatus === "not_found" || Date.now() > solverDeadline) {
         solverStatus = "not_found";
         clearInterval(checkPollTimer);
         checkPollTimer = null;
+        hideThinkingOverlay();
         setStatus("コンピュータの回答は見つかりませんでした。", "warn");
         btnCheck.disabled = false;
       }
@@ -573,11 +598,32 @@
     return buildShapeIcon(color, shape, "active");
   }
 
+  function showGoalRevealBanner(goal, desc) {
+    const banner = document.getElementById("goal-reveal-banner");
+    const iconBox = document.getElementById("goal-reveal-banner-icon");
+    const textEl = document.getElementById("goal-reveal-banner-text");
+    if (!banner || !iconBox || !textEl) return;
+    iconBox.innerHTML = "";
+    const icon = document.createElement("div");
+    icon.className = `target-icon shape-${goal.shape} tint-${goal.color} active`;
+    iconBox.appendChild(icon);
+    textEl.textContent = desc;
+    banner.classList.remove("show");
+    // eslint-disable-next-line no-unused-expressions
+    void banner.offsetWidth; // 連続でゴールが変わってもアニメーションを最初からやり直させる
+    banner.classList.add("show");
+  }
+
   function nextGoal() {
     if (checkPollTimer) {
       clearInterval(checkPollTimer);
       checkPollTimer = null;
     }
+    if (thinkingShowTimer) {
+      clearTimeout(thinkingShowTimer);
+      thinkingShowTimer = null;
+    }
+    hideThinkingOverlay();
     solverStatus = "idle";
     solverPath = null;
 
@@ -602,6 +648,7 @@
       currentGoal.color === "rainbow"
         ? `いずれかのロボットを${shapeLabel}のマスへ`
         : `${COLOR_INFO[currentGoal.color].label}ロボットを${shapeLabel}のマスへ`;
+    showGoalRevealBanner(currentGoal, goalDescEl.textContent);
 
     placeGoalIndicator(currentGoal.r, currentGoal.c);
     refreshTargetEmphasis();
@@ -627,6 +674,11 @@
       clearInterval(checkPollTimer);
       checkPollTimer = null;
     }
+    if (thinkingShowTimer) {
+      clearTimeout(thinkingShowTimer);
+      thinkingShowTimer = null;
+    }
+    hideThinkingOverlay();
     if (selectedRobot !== null) {
       robotEls[selectedRobot].classList.remove("selected");
       selectedRobot = null;
@@ -678,9 +730,15 @@
       clearInterval(checkPollTimer);
       checkPollTimer = null;
     }
+    if (thinkingShowTimer) {
+      clearTimeout(thinkingShowTimer);
+      thinkingShowTimer = null;
+    }
+    hideThinkingOverlay();
     solverStatus = "idle";
     locked = false;
     selectedRobot = null;
+    btnNext.disabled = false;
 
     board = generateBoard({ useDiagonals: USE_DIAGONALS, colors: ACTIVE_COLORS });
     robots = placeRobotsRandomly();
@@ -768,5 +826,11 @@
       diagonalBadge.style.display = USE_DIAGONALS ? "" : "none";
     }
     newMap();
+  };
+
+  // テスト用に内部状態を覗ける・強制的に「思考中」状態にできるようにしておく
+  window._HRSoloDebug = {
+    forceSearching: () => { solverStatus = "searching"; },
+    getSolverStatus: () => solverStatus,
   };
 })();
