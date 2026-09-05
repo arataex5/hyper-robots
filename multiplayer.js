@@ -1181,6 +1181,18 @@
     banner.classList.add("show");
   }
 
+  function showHostChangedBanner(newHostPeerId) {
+    const banner = document.getElementById("disconnect-banner");
+    if (!banner || !mp) return;
+    const p = mp.players.find((x) => x.peerId === newHostPeerId);
+    const name = p ? p.name || "プレイヤー" : "プレイヤー";
+    banner.innerHTML = `<div class="clear-banner-text"><span class="clear-banner-text-inner">${name}さんが<span class="clear-banner-sub">新しいホストになりました</span></span></div>`;
+    banner.classList.remove("show");
+    // eslint-disable-next-line no-unused-expressions
+    void banner.offsetWidth;
+    banner.classList.add("show");
+  }
+
   // ================= online.js からのメッセージ受け口 =================
 
   window.handleOnlineGameMessage = function (msg) {
@@ -1371,6 +1383,15 @@
     });
     window.HRNet.on("peer-disconnected", (peerId) => {
       if (window.__HR_ONLINE_ACTIVE) showDisconnectBanner(peerId);
+    });
+    window.HRNet.on("host-changed", (newHostPeerId) => {
+      // 対局中にホストが切断し、別のプレイヤーへ引き継がれた場合に、
+      // 誰でも見えるようにその旨を知らせる。
+      if (window.__HR_ONLINE_ACTIVE && mp) {
+        mp.isHost = window.HRNet.isHost();
+        showHostChangedBanner(newHostPeerId);
+        renderHud();
+      }
     });
     window.HRNet.on("peer-list-changed", () => {
       // 対局中に誰かが切断／復帰した時、HUDと（表示中なら）準備確認の

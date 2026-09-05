@@ -170,6 +170,56 @@
       }
     }
 
+    // WebRTCの切断は、タブを閉じる／OSがバックグラウンドで強制終了する
+    // ／回線が急に切れるといった「行儀の悪い」切れ方をした場合、
+    // conn の "close"／"error" イベントが発火しない、または発火するまで
+    // 非常に長い時間がかかることがある（PeerJSまかせのICE状態変化検知に
+    // 依存しているため）。これに頼っていると、切断がいつまでも検知
+    // されず、ホスト引き継ぎも再接続の認識も動かなくなってしまう。
+    // そこで、一定間隔で全員に軽量な "ping" を送り合い、しばらく
+    // 何も届かない相手は「切断」とみなして能動的に処理する。
+    const HEARTBEAT_INTERVAL_MS = 3000;
+    const HEARTBEAT_TIMEOUT_MS = 9000;
+    let heartbeatTimer = null;
+
+    function markPeerDisconnected(peerId) {
+      const p = peers.get(peerId);
+      if (!p || !p.connected) return;
+      p.connected = false;
+      if (p.conn) {
+        try { p.conn.close(); } catch (e) { /* noop */ }
+      }
+      emitter.emit("peer-disconnected", peerId);
+      emitter.emit("peer-list-changed", peerListArray());
+      if (isHost()) {
+        broadcast({ type: "peer-left", peerId });
+      }
+      maybeMigrateHost();
+    }
+
+    function startHeartbeat() {
+      stopHeartbeat();
+      heartbeatTimer = setInterval(() => {
+        const now = Date.now();
+        peers.forEach((p, peerId) => {
+          if (!p.connected) return;
+          if (p.conn && p.conn.open) {
+            try { p.conn.send(JSON.stringify({ type: "ping" })); } catch (e) { /* noop */ }
+          }
+          const last = p.lastSeen || 0;
+          if (now - last > HEARTBEAT_TIMEOUT_MS) {
+            markPeerDisconnected(peerId);
+          }
+        });
+      }, HEARTBEAT_INTERVAL_MS);
+    }
+    function stopHeartbeat() {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    }
+
     function handleIncomingData(fromPeerId, raw) {
       let msg;
       try {
@@ -177,6 +227,12 @@
       } catch (e) {
         return;
       }
+      // 種類を問わず、何か届いた時点でその相手は生きていると分かる
+      // （pingだけでなく、通常のアプリメッセージでも同様に更新する）。
+      const fromPeer = peers.get(fromPeerId);
+      if (fromPeer) fromPeer.lastSeen = Date.now();
+      if (msg.type === "ping") return; // 生存確認だけが目的で、それ以上の処理は不要
+
       emitter.emit("message", { from: fromPeerId, message: msg });
 
       if (msg.type === "welcome") {
@@ -187,7 +243,7 @@
         msg.peerList.forEach((p) => {
           if (p.peerId === myPeerId) return;
           if (!peers.has(p.peerId)) {
-            peers.set(p.peerId, { ...p, conn: null });
+            peers.set(p.peerId, { ...p, conn: null, lastSeen: Date.now() });
           } else {
             Object.assign(peers.get(p.peerId), p);
           }
@@ -203,7 +259,7 @@
       } else if (msg.type === "peer-joined") {
         const p = msg.peer;
         if (p.peerId === myPeerId) return;
-        if (!peers.has(p.peerId)) peers.set(p.peerId, { ...p, conn: null });
+        if (!peers.has(p.peerId)) peers.set(p.peerId, { ...p, conn: null, lastSeen: Date.now() });
         else Object.assign(peers.get(p.peerId), p);
         if (shouldInitiateConnection(myJoinOrder, p.joinOrder)) {
           connectTo(p.peerId);
@@ -336,6 +392,7 @@
           existing.conn = conn;
           existing.connected = true;
           existing.connecting = false;
+          existing.lastSeen = Date.now();
           if (remoteProfile) existing.profile = remoteProfile;
           if (remoteToken) existing.token = remoteToken;
         } else {
@@ -348,6 +405,7 @@
             isCpu: false,
             connecting: false,
             token: remoteToken || null,
+            lastSeen: Date.now(),
           });
         }
         emitter.emit("peer-connected", conn.peer);
@@ -382,7 +440,7 @@
       else {
         peers.set(remotePeerId, {
           peerId: remotePeerId, profile: null, joinOrder: 9999,
-          connected: false, conn: null, isCpu: false, connecting: true,
+          connected: false, conn: null, isCpu: false, connecting: true, lastSeen: Date.now(),
         });
       }
       // メッシュ内の他メンバーへの接続にも、自分のtoken・プロフィールを
@@ -424,6 +482,7 @@
         emitter.emit("broker-disconnected");
       });
 
+      startHeartbeat();
       emitter.emit("room-created", { roomId, peerId: myPeerId });
       return { roomId, peerId: myPeerId };
     }
@@ -474,6 +533,7 @@
           hostPeerId = info.hostPeerId;
           // ホストが発行してくれたトークンを保存しておく（次に再接続する時に提示する）
           if (info.yourToken) storeToken(inputRoomId, info.yourToken);
+          startHeartbeat();
           resolve({ roomId, peerId: myPeerId, hostPeerId });
         });
         conn.on("error", (err) => {
@@ -492,6 +552,7 @@
     }
 
     function leaveRoom() {
+      stopHeartbeat();
       peers.forEach((p) => {
         if (p.conn) {
           try {
