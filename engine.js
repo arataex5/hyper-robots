@@ -196,190 +196,229 @@ const MAX_TARGETS_PER_LINE = 2;
 // 1回分の盤面候補を組み立てる。壁ごとに「どのグループ（L字1組・ノッチ1本・
 // コア全体）に属するか」を記録し、異なるグループの壁が同じ格子点で
 // 接してしまっていないかを最後にチェックできるようにする。
-function buildCandidateBoard() {
-  const hWalls = new Set();
-  const vWalls = new Set();
+function buildQuadrantData(corner, tpl, k, isRainbowCorner) {
   const targets = [];
-  const vertexGroups = new Map(); // "i,j" -> Set<groupId>
-  const lCorners = []; // { r, c, dirs: [dir,dir] } for the 形チェック（意図して作ったL字のみ）
+  const wallDefs = []; // { r, c, dir, groupId }
+  const lCorners = []; // { r, c, dirs: [dir,dir] }（source は呼び出し側で付与）
 
-  function touchVertex(i, j, groupId) {
-    const key = `${i},${j}`;
-    let set = vertexGroups.get(key);
-    if (!set) {
-      set = new Set();
-      vertexGroups.set(key, set);
+  tpl.targets.forEach((t) => {
+    const [lr, lc] = rotateCell(t.r, t.c, k);
+    targets.push({
+      r: lr + corner.rowOff,
+      c: lc + corner.colOff,
+      color: t.color,
+      shape: t.shape,
+    });
+  });
+
+  // テンプレート内の壁は「同じローカル座標(r,c)」ごとに1組のL字として
+  // まとまっている（ターゲット1個につき2辺）。そのペアをグループ化する。
+  const wallsByCell = new Map();
+  tpl.walls.forEach((w) => {
+    const key = `${w.r},${w.c}`;
+    if (!wallsByCell.has(key)) wallsByCell.set(key, []);
+    wallsByCell.get(key).push(w);
+  });
+  let li = 0;
+  wallsByCell.forEach((wallList) => {
+    const groupId = `${corner.key}-L${li++}`;
+    const rotated = wallList.map((w) => {
+      const [lr, lc] = rotateCell(w.r, w.c, k);
+      return { r: lr + corner.rowOff, c: lc + corner.colOff, dir: rotateDir(w.dir, k) };
+    });
+    rotated.forEach((w) => wallDefs.push({ r: w.r, c: w.c, dir: w.dir, groupId }));
+    if (rotated.length === 2 && rotated[0].r === rotated[1].r && rotated[0].c === rotated[1].c) {
+      lCorners.push({ r: rotated[0].r, c: rotated[0].c, dirs: [rotated[0].dir, rotated[1].dir] });
     }
-    set.add(groupId);
+  });
+
+  if (isRainbowCorner && tpl.rainbowSlot) {
+    const slot = tpl.rainbowSlot;
+    const [lr, lc] = rotateCell(slot.r, slot.c, k);
+    const gr = lr + corner.rowOff;
+    const gc = lc + corner.colOff;
+    targets.push({ r: gr, c: gc, color: "rainbow", shape: "circle" });
+    const groupId = `${corner.key}-rainbow`;
+    const rDirs = slot.walls.map((dir) => rotateDir(dir, k));
+    rDirs.forEach((ldir) => wallDefs.push({ r: gr, c: gc, dir: ldir, groupId }));
+    if (rDirs.length === 2) lCorners.push({ r: gr, c: gc, dirs: rDirs });
   }
 
-  function addWallG(r, c, dir, groupId) {
-    if (r < 0 || r > 15 || c < 0 || c > 15) return;
-    addWall(hWalls, vWalls, r, c, dir);
-    if (dir === "N") { touchVertex(r, c, groupId); touchVertex(r, c + 1, groupId); }
-    else if (dir === "S") { touchVertex(r + 1, c, groupId); touchVertex(r + 1, c + 1, groupId); }
-    else if (dir === "W") { touchVertex(r, c, groupId); touchVertex(r + 1, c, groupId); }
-    else if (dir === "E") { touchVertex(r, c + 1, groupId); touchVertex(r + 1, c + 1, groupId); }
-  }
+  return { targets, wallDefs, lCorners };
+}
 
-  // 2方向の壁を一度に登録し、意図して作られたL字コーナーとして記録する。
-  function addLCornerG(r, c, dirA, dirB, groupIdPrefix) {
-    addWallG(r, c, dirA, `${groupIdPrefix}`);
-    addWallG(r, c, dirB, `${groupIdPrefix}`);
-    lCorners.push({ r, c, dirs: [dirA, dirB] });
-  }
-
+// 盤面候補を1回組み立てる。形チェック（コの字／Cの字／冠／受け皿）に
+// 違反する組み合わせが見つかった場合は、盤面全体を作り直すのではなく、
+// 違反している側の区画を90度回転（＝別のテンプレート回転)し直して
+// 修正する、という反復処理で解決する。
+//   ①16×16の初期盤面を組み立てる
+//   ②縦軸（列）を1列ずつチェックし、違反があれば片方の区画を回転
+//   ③横軸（行）を1行ずつチェックし、違反があれば片方の区画を回転
+//   ④②③を、違反が0件になるまで繰り返す
+// 頂点の接触チェック（検証1）・1列あたりのゴール数チェック（検証2）は
+// 区画の回転では解決できない種類の問題なので、これらが崩れた場合は
+// この候補自体を無効として返し、呼び出し側（generateBoard）の
+// 「候補ごと作り直す」リトライに委ねる。
+function buildCandidateBoard() {
   const templatePool = shuffle(BOARD_TEMPLATES);
-  // どの区画に「レインボー」ゴールを持たせるかを毎回ランダムに選ぶ。
-  // ＝レインボーゴールも他のゴールと同じく、盤面ごとに位置が変わる。
   const rainbowCornerIndex = randInt(4);
 
+  // 区画ごとの状態（テンプレート＋回転）。回転修正のたびにkを書き換える。
+  const quadrantStates = {};
   CORNERS.forEach((corner, ci) => {
-    const tpl = templatePool[ci % templatePool.length];
-    const k = randInt(4);
+    quadrantStates[corner.key] = {
+      tpl: templatePool[ci % templatePool.length],
+      k: randInt(4),
+    };
+  });
 
-    tpl.targets.forEach((t) => {
-      const [lr, lc] = rotateCell(t.r, t.c, k);
-      targets.push({
-        r: lr + corner.rowOff,
-        c: lc + corner.colOff,
-        color: t.color,
-        shape: t.shape,
+  // ノッチの定義（8本ぶん）。区画の回転では直せない衝突（ノッチ同士）が
+  // 起きた場合は、これを丸ごと引き直す。
+  let notchDefs = buildOuterNotchDefs();
+
+  function rebuild() {
+    const hWalls = new Set();
+    const vWalls = new Set();
+    const targets = [];
+    const vertexGroups = new Map();
+    const lCorners = [];
+
+    function touchVertex(i, j, groupId) {
+      const key = `${i},${j}`;
+      let set = vertexGroups.get(key);
+      if (!set) { set = new Set(); vertexGroups.set(key, set); }
+      set.add(groupId);
+    }
+    function addWallG(r, c, dir, groupId) {
+      if (r < 0 || r > 15 || c < 0 || c > 15) return;
+      addWall(hWalls, vWalls, r, c, dir);
+      if (dir === "N") { touchVertex(r, c, groupId); touchVertex(r, c + 1, groupId); }
+      else if (dir === "S") { touchVertex(r + 1, c, groupId); touchVertex(r + 1, c + 1, groupId); }
+      else if (dir === "W") { touchVertex(r, c, groupId); touchVertex(r + 1, c, groupId); }
+      else if (dir === "E") { touchVertex(r, c + 1, groupId); touchVertex(r + 1, c + 1, groupId); }
+    }
+
+    CORNERS.forEach((corner, ci) => {
+      const { tpl, k } = quadrantStates[corner.key];
+      const data = buildQuadrantData(corner, tpl, k, ci === rainbowCornerIndex);
+      targets.push(...data.targets);
+      data.wallDefs.forEach((w) => addWallG(w.r, w.c, w.dir, w.groupId));
+      data.lCorners.forEach((lc) => {
+        lc.source = { type: "quadrant", key: corner.key };
+        lCorners.push(lc);
       });
     });
 
-    // テンプレート内の壁は「同じローカル座標(r,c)」ごとに1組のL字として
-    // まとまっている（ターゲット1個につき2辺）。そのペアをグループ化する。
-    const wallsByCell = new Map();
-    tpl.walls.forEach((w) => {
-      const key = `${w.r},${w.c}`;
-      if (!wallsByCell.has(key)) wallsByCell.set(key, []);
-      wallsByCell.get(key).push(w);
+    // 中央2x2の「コア」。コア自身はこの形チェックの対象外（lCornersには入れない）。
+    const blocked = new Set(CORE_CELLS.map(([r, c]) => `${r},${c}`));
+    CORE_CELLS.forEach(([r, c]) => {
+      ["N", "S", "E", "W"].forEach((dir) => addWallG(r, c, dir, "core"));
     });
-    let li = 0;
-    wallsByCell.forEach((wallList) => {
-      const groupId = `${corner.key}-L${li++}`;
-      const rotated = wallList.map((w) => {
-        const [lr, lc] = rotateCell(w.r, w.c, k);
-        return { r: lr + corner.rowOff, c: lc + corner.colOff, dir: rotateDir(w.dir, k) };
-      });
-      rotated.forEach((w) => addWallG(w.r, w.c, w.dir, groupId));
-      if (rotated.length === 2 && rotated[0].r === rotated[1].r && rotated[0].c === rotated[1].c) {
-        lCorners.push({ r: rotated[0].r, c: rotated[0].c, dirs: [rotated[0].dir, rotated[1].dir] });
+
+    // 各区画の外周付近のノッチ。1本ずつ独立したグループとする。
+    // 外枠に接しているため、外枠の暗黙の壁と合わせて実質的に2方向の
+    // L字コーナーとして扱う（形チェックの対象に含める）。外周壁は実際の
+    // 壁データを持たない「概念上の壁」であり、その役割は「向かい合う辺」
+    // を演じること。右端(c=15)のノッチが同じ行の別のL字（東向き）と
+    // 向かい合うには西向きを担う必要がある、というように、ノッチ自身の
+    // 壁の向きに対して逆向きを割り当てる。
+    notchDefs.forEach(([r, c, dir], idx) => {
+      addWallG(r, c, dir, `notch${idx}`);
+      const impliedEdgeDir = r === 0 ? "S" : r === 15 ? "N" : c === 0 ? "E" : "W";
+      lCorners.push({ r, c, dirs: [dir, impliedEdgeDir], source: { type: "notch", idx } });
+    });
+
+    // ターゲット・レインボーのL字コーナーが、たまたま盤面の一番外側の
+    // 行／列に位置している場合も同様に、外枠を「向かい合う辺」として扱う。
+    lCorners.forEach((corner) => {
+      const implied = [];
+      if (corner.r === 0 && !corner.dirs.includes("S")) implied.push("S");
+      if (corner.r === 15 && !corner.dirs.includes("N")) implied.push("N");
+      if (corner.c === 0 && !corner.dirs.includes("E")) implied.push("E");
+      if (corner.c === 15 && !corner.dirs.includes("W")) implied.push("W");
+      if (implied.length > 0) corner.dirs = corner.dirs.concat(implied);
+    });
+
+    // 中央コア（2x2）に隣接するL字コーナーも同様（コア自身の実際の壁
+    // データと同じ意味になるため、方向の入れ替えは不要）。
+    const CORE_ADJACENT_IMPLIED = {
+      "6,7": "S", "6,8": "S", "9,7": "N", "9,8": "N",
+      "7,6": "E", "8,6": "E", "7,9": "W", "8,9": "W",
+    };
+    lCorners.forEach((corner) => {
+      const impliedDir = CORE_ADJACENT_IMPLIED[`${corner.r},${corner.c}`];
+      if (impliedDir && !corner.dirs.includes(impliedDir)) {
+        corner.dirs = corner.dirs.concat([impliedDir]);
       }
     });
 
-    if (ci === rainbowCornerIndex && tpl.rainbowSlot) {
-      const slot = tpl.rainbowSlot;
-      const [lr, lc] = rotateCell(slot.r, slot.c, k);
-      const gr = lr + corner.rowOff;
-      const gc = lc + corner.colOff;
-      targets.push({ r: gr, c: gc, color: "rainbow", shape: "circle" });
-      const groupId = `${corner.key}-rainbow`;
-      const rDirs = slot.walls.map((dir) => rotateDir(dir, k));
-      rDirs.forEach((ldir) => addWallG(gr, gc, ldir, groupId));
-      if (rDirs.length === 2) lCorners.push({ r: gr, c: gc, dirs: rDirs });
-    }
-  });
-
-  // 中央2x2の「コア」。内部で壁同士が接するのは問題ないので、
-  // まとめて1つのグループとして扱う（＝コア自身との整合性は常にOK）。
-  // ※ コア自体はこの形チェックの対象外（lCornersには入れない）。
-  const blocked = new Set(CORE_CELLS.map(([r, c]) => `${r},${c}`));
-  CORE_CELLS.forEach(([r, c]) => {
-    ["N", "S", "E", "W"].forEach((dir) => addWallG(r, c, dir, "core"));
-  });
-
-  // 各区画の外周付近のノッチ（中央寄りだが毎回位置が変わる）。1本ずつ完全に
-  // 独立したグループとする。外枠に接しているため、外枠の暗黙の壁と合わせて
-  // 実質的に2方向のL字コーナーとして扱う（形チェックの対象に含める）。
-  //
-  // 【重要】外周壁は実際の壁データを持たない「概念上の壁」であり、その
-  // 役割は「向かい合う辺」を演じること。例えば右端(c=15)にあるノッチが、
-  // 同じ行のもっと左側にある別のL字（東向きの壁を持つ）と「向かい合って
-  // 冠の形になる」ためには、このノッチ側は「西向き」を担う必要がある
-  // （盤面右端はその行にとっての『行き止まりの左向きの壁』として働く）。
-  // 逆に「東向き(自分の壁が右を塞ぐ)」を割り当ててしまうと、実際の壁
-  // データ上は同じ意味（hasE(r,15)はhasW(r,16)と同じ壁）でも、この形
-  // チェックが求める「向かい合う」関係を作れず、外周絡みの違反を
-  // 検出できなくなる。
-  buildOuterNotchDefs().forEach(([r, c, dir], idx) => {
-    addWallG(r, c, dir, `notch${idx}`);
-    const impliedEdgeDir = r === 0 ? "S" : r === 15 ? "N" : c === 0 ? "E" : "W";
-    lCorners.push({ r, c, dirs: [dir, impliedEdgeDir] });
-  });
-
-  // ターゲット・レインボーのL字コーナーが、たまたま盤面の一番外側の
-  // 行／列（0行目・15行目・0列目・15列目）に位置している場合も同様に、
-  // 外枠を「向かい合う辺」として扱う（上のノッチと同じ考え方）。
-  lCorners.forEach((corner) => {
-    const implied = [];
-    if (corner.r === 0 && !corner.dirs.includes("S")) implied.push("S");
-    if (corner.r === 15 && !corner.dirs.includes("N")) implied.push("N");
-    if (corner.c === 0 && !corner.dirs.includes("E")) implied.push("E");
-    if (corner.c === 15 && !corner.dirs.includes("W")) implied.push("W");
-    if (implied.length > 0) corner.dirs = corner.dirs.concat(implied);
-  });
-
-  // 中央コア（2x2）に隣接するL字コーナーも同様。コア自体が4方向とも
-  // 壁で塞がれているため、コアに接するマスは「コア側を向いた壁」を
-  // 自前で持たなくても、その方向への移動はコアの壁によって既に
-  // ブロックされている。これを考慮しないと、コアを挟んで向き合う
-  // 2つのL字コーナー（例：コアのすぐ下の行に2つの目標が離れて並び、
-  // どちらもコア側の壁を持たないが、実質的にコアが「共有の壁」の
-  // 役割を果たして冠・受け皿の形になるケース）を見逃してしまう。
-  // （こちらは外周壁と違い、コア自身の実際の壁データと同じ意味になる
-  // ため、方向の入れ替えは不要。）
-  const CORE_ADJACENT_IMPLIED = {
-    "6,7": "S", "6,8": "S", // コアの真上
-    "9,7": "N", "9,8": "N", // コアの真下
-    "7,6": "E", "8,6": "E", // コアの真左
-    "7,9": "W", "8,9": "W", // コアの真右
-  };
-  lCorners.forEach((corner) => {
-    const impliedDir = CORE_ADJACENT_IMPLIED[`${corner.r},${corner.c}`];
-    if (impliedDir && !corner.dirs.includes(impliedDir)) {
-      corner.dirs = corner.dirs.concat([impliedDir]);
-    }
-  });
-
-  // 検証1: どの格子点でも「異なるグループ」が同時に接していないこと。
-  // （同一グループ内でのL字や、コア自身の内部構造は問題なし）
-  let valid = true;
-  for (const groupSet of vertexGroups.values()) {
-    if (groupSet.size > 1) {
-      valid = false;
-      break;
-    }
+    return { hWalls, vWalls, targets, vertexGroups, lCorners, blocked };
   }
 
+  // 検証1: どの格子点でも「異なるグループ」が同時に接していないこと。
+  function checkVertexGroups(state) {
+    for (const groupSet of state.vertexGroups.values()) {
+      if (groupSet.size > 1) return false;
+    }
+    return true;
+  }
   // 検証2: 縦・横それぞれの1列に並ぶゴールの数が偏りすぎていないこと。
-  if (valid) {
+  function checkMaxTargetsPerLine(targets) {
     const rowCounts = new Map();
     const colCounts = new Map();
     for (const t of targets) {
       rowCounts.set(t.r, (rowCounts.get(t.r) || 0) + 1);
       colCounts.set(t.c, (colCounts.get(t.c) || 0) + 1);
     }
-    for (const n of rowCounts.values()) {
-      if (n > MAX_TARGETS_PER_LINE) { valid = false; break; }
+    for (const n of rowCounts.values()) if (n > MAX_TARGETS_PER_LINE) return false;
+    for (const n of colCounts.values()) if (n > MAX_TARGETS_PER_LINE) return false;
+    return true;
+  }
+
+  // 違反の一方を修正する: 区画由来のコーナーなら、その区画を90度回転
+  // （回転値を1つ進める）。ノッチ同士の衝突（区画に属さない）の場合は、
+  // 区画の回転では直せないのでノッチ配置を全て引き直す。
+  function fixViolation(violation) {
+    const pick = violation.a.source.type === "quadrant" ? violation.a : violation.b;
+    if (pick.source.type === "quadrant") {
+      const st = quadrantStates[pick.source.key];
+      st.k = (st.k + 1) % 4;
+    } else {
+      notchDefs = buildOuterNotchDefs();
     }
-    if (valid) {
-      for (const n of colCounts.values()) {
-        if (n > MAX_TARGETS_PER_LINE) { valid = false; break; }
+  }
+
+  let state = rebuild();
+  if (!checkVertexGroups(state) || !checkMaxTargetsPerLine(state.targets)) {
+    return { valid: false, ...state };
+  }
+
+  const MAX_FIX_ITERATIONS = 400;
+  for (let iter = 0; iter < MAX_FIX_ITERATIONS; iter++) {
+    const colViolation = findFirstColumnViolation(state.lCorners);
+    if (colViolation) {
+      fixViolation(colViolation);
+      state = rebuild();
+      if (!checkVertexGroups(state) || !checkMaxTargetsPerLine(state.targets)) {
+        return { valid: false, ...state };
       }
+      continue;
     }
+    const rowViolation = findFirstRowViolation(state.lCorners);
+    if (rowViolation) {
+      fixViolation(rowViolation);
+      state = rebuild();
+      if (!checkVertexGroups(state) || !checkMaxTargetsPerLine(state.targets)) {
+        return { valid: false, ...state };
+      }
+      continue;
+    }
+    // 列・行のどちらにも違反がない ＝ 完成
+    return { valid: true, ...state };
   }
-
-  // 検証3: 同じ行・同じ列の軸上（外枠のノッチも含む）にある意図的なL字
-  // コーナー同士が、距離に関係なく「コの字／Cの字／冠／受け皿」の向きに
-  // なっていないこと。
-  if (valid) {
-    const boxes = findAxisShapeViolations(lCorners);
-    if (boxes.length > 0) valid = false;
-  }
-
-  return { valid, hWalls, vWalls, blocked, targets, lCorners };
+  // 反復回数の上限に達した場合は無効として返す（呼び出し側が候補ごと
+  // 作り直す。理論上の安全弁で、実際にはまず到達しない）。
+  return { valid: false, ...state };
 }
 
 // 「コの字／Cの字／冠の形／受け皿の形」判定 ---------------------------------
@@ -391,13 +430,62 @@ function buildCandidateBoard() {
 // リスト（{ r, c, dirs: [dir, dir] } の配列）。単一の壁を隣のマスから見た
 // ときの「もう片側」のような、意図しない組み合わせを誤検出しないよう、
 // 生の壁データを再スキャンするのではなくこのリストを直接使う。
+function findFirstColumnViolation(lCorners) {
+  const byCol = new Map();
+  lCorners.forEach((corner) => {
+    if (!byCol.has(corner.c)) byCol.set(corner.c, []);
+    byCol.get(corner.c).push(corner);
+  });
+  for (let c = 0; c <= 15; c++) {
+    const list = byCol.get(c);
+    if (!list || list.length < 2) continue;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const top = list[i].r < list[j].r ? list[i] : list[j];
+        const bottom = list[i].r < list[j].r ? list[j] : list[i];
+        if (top.r === bottom.r) continue;
+        if (!top.dirs.includes("S") || !bottom.dirs.includes("N")) continue;
+        const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d));
+        if (hDir) {
+          return { shape: hDir === "E" ? "コ" : "C", axis: "col", c, a: top, b: bottom };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function findFirstRowViolation(lCorners) {
+  const byRow = new Map();
+  lCorners.forEach((corner) => {
+    if (!byRow.has(corner.r)) byRow.set(corner.r, []);
+    byRow.get(corner.r).push(corner);
+  });
+  for (let r = 0; r <= 15; r++) {
+    const list = byRow.get(r);
+    if (!list || list.length < 2) continue;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const left = list[i].c < list[j].c ? list[i] : list[j];
+        const right = list[i].c < list[j].c ? list[j] : list[i];
+        if (left.c === right.c) continue;
+        if (!left.dirs.includes("E") || !right.dirs.includes("W")) continue;
+        const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d));
+        if (vDir) {
+          return { shape: vDir === "N" ? "冠" : "受け皿", axis: "row", r, a: left, b: right };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// findFirstColumnViolation/findFirstRowViolation の「1件だけ返す」版と
+// 同じ判定ロジックで、盤面全体の違反を漏れなく列挙する版（テスト・
+// 診断用）。
 function findAxisShapeViolations(lCorners) {
   const violations = [];
 
-  // 横方向の軸（同じ行）: 左のコーナーが右（E）を、右のコーナーが左
-  // （W）を向いて「向かい合っている」（面と面）組み合わせだけを禁止する。
-  // 背中合わせ（外向き）はOK。縦方向(N/S)は両方とも同じ向きで一致して
-  // いる必要がある。【冠】=N,N／【受け皿】=S,S。
   const byRow = new Map();
   lCorners.forEach((corner) => {
     if (!byRow.has(corner.r)) byRow.set(corner.r, []);
@@ -421,10 +509,6 @@ function findAxisShapeViolations(lCorners) {
     }
   });
 
-  // 縦方向の軸（同じ列）: 上のコーナーが下（S）を、下のコーナーが上
-  // （N）を向いて「向かい合っている」（面と面）組み合わせだけを禁止する。
-  // 背中合わせ（外向き）はOK。横方向(E/W)は両方とも同じ向きで一致して
-  // いる必要がある。【コ】=E,E／【C】=W,W。
   const byCol = new Map();
   lCorners.forEach((corner) => {
     if (!byCol.has(corner.c)) byCol.set(corner.c, []);
