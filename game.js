@@ -862,5 +862,6 @@
       solver = { step: () => ({ status: "continue" }) };
     },
     getSolverStatus: () => solverStatus,
+    getBoard: () => board,
   };
 })();

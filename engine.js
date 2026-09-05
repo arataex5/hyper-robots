@@ -317,25 +317,25 @@ function buildCandidateBoard() {
 
     // 各区画の外周付近のノッチ。1本ずつ独立したグループとする。
     // 外枠に接しているため、外枠の暗黙の壁と合わせて実質的に2方向の
-    // L字コーナーとして扱う（形チェックの対象に含める）。外周壁は実際の
-    // 壁データを持たない「概念上の壁」であり、その役割は「向かい合う辺」
-    // を演じること。右端(c=15)のノッチが同じ行の別のL字（東向き）と
-    // 向かい合うには西向きを担う必要がある、というように、ノッチ自身の
-    // 壁の向きに対して逆向きを割り当てる。
+    // L字コーナーとして扱う（形チェックの対象に含める）。禁止パターンは
+    // 「外向き（背中合わせと逆＝面が外を向く）」の組み合わせなので、外周
+    // 壁が担う暗黙の方向は、実際にその位置がブロックしている自然な方向
+    // （右端(c=15)なら東・左端(c=0)なら西・上端(r=0)なら北・下端(r=15)
+    // なら南）とそのまま一致する。
     notchDefs.forEach(([r, c, dir], idx) => {
       addWallG(r, c, dir, `notch${idx}`);
-      const impliedEdgeDir = r === 0 ? "S" : r === 15 ? "N" : c === 0 ? "E" : "W";
+      const impliedEdgeDir = r === 0 ? "N" : r === 15 ? "S" : c === 0 ? "W" : "E";
       lCorners.push({ r, c, dirs: [dir, impliedEdgeDir], source: { type: "notch", idx } });
     });
 
     // ターゲット・レインボーのL字コーナーが、たまたま盤面の一番外側の
-    // 行／列に位置している場合も同様に、外枠を「向かい合う辺」として扱う。
+    // 行／列に位置している場合も同様に、外枠の自然な方向を暗黙の辺として扱う。
     lCorners.forEach((corner) => {
       const implied = [];
-      if (corner.r === 0 && !corner.dirs.includes("S")) implied.push("S");
-      if (corner.r === 15 && !corner.dirs.includes("N")) implied.push("N");
-      if (corner.c === 0 && !corner.dirs.includes("E")) implied.push("E");
-      if (corner.c === 15 && !corner.dirs.includes("W")) implied.push("W");
+      if (corner.r === 0 && !corner.dirs.includes("N")) implied.push("N");
+      if (corner.r === 15 && !corner.dirs.includes("S")) implied.push("S");
+      if (corner.c === 0 && !corner.dirs.includes("W")) implied.push("W");
+      if (corner.c === 15 && !corner.dirs.includes("E")) implied.push("E");
       if (implied.length > 0) corner.dirs = corner.dirs.concat(implied);
     });
 
@@ -444,7 +444,7 @@ function findFirstColumnViolation(lCorners) {
         const top = list[i].r < list[j].r ? list[i] : list[j];
         const bottom = list[i].r < list[j].r ? list[j] : list[i];
         if (top.r === bottom.r) continue;
-        if (!top.dirs.includes("S") || !bottom.dirs.includes("N")) continue;
+        if (!top.dirs.includes("N") || !bottom.dirs.includes("S")) continue;
         const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d));
         if (hDir) {
           return { shape: hDir === "E" ? "コ" : "C", axis: "col", c, a: top, b: bottom };
@@ -469,7 +469,7 @@ function findFirstRowViolation(lCorners) {
         const left = list[i].c < list[j].c ? list[i] : list[j];
         const right = list[i].c < list[j].c ? list[j] : list[i];
         if (left.c === right.c) continue;
-        if (!left.dirs.includes("E") || !right.dirs.includes("W")) continue;
+        if (!left.dirs.includes("W") || !right.dirs.includes("E")) continue;
         const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d));
         if (vDir) {
           return { shape: vDir === "N" ? "冠" : "受け皿", axis: "row", r, a: left, b: right };
@@ -497,7 +497,7 @@ function findAxisShapeViolations(lCorners) {
         const left = list[i].c < list[j].c ? list[i] : list[j];
         const right = list[i].c < list[j].c ? list[j] : list[i];
         if (left.c === right.c) continue;
-        if (!left.dirs.includes("E") || !right.dirs.includes("W")) continue;
+        if (!left.dirs.includes("W") || !right.dirs.includes("E")) continue;
         const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d));
         if (vDir) {
           violations.push({
@@ -520,7 +520,7 @@ function findAxisShapeViolations(lCorners) {
         const top = list[i].r < list[j].r ? list[i] : list[j];
         const bottom = list[i].r < list[j].r ? list[j] : list[i];
         if (top.r === bottom.r) continue;
-        if (!top.dirs.includes("S") || !bottom.dirs.includes("N")) continue;
+        if (!top.dirs.includes("N") || !bottom.dirs.includes("S")) continue;
         const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d));
         if (hDir) {
           violations.push({
