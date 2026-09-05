@@ -196,9 +196,19 @@
 
   function handleAppMessage(from, msg) {
     if (msg.type === "room-state") {
+      const isFreshJoin = room === null;
       room = msg.state;
       iAmHost = window.HRNet.isHost();
-      renderRoom();
+      if (isFreshJoin && room.phase === "in-game" && !window.__HR_ONLINE_ACTIVE) {
+        // 対局中のルームに、ロビーを経由せず参加しようとしている
+        // （タブを閉じた／タイトルへ戻った後の再合流）。ロビー画面は
+        // 出さず、ホストからの resume-game を待つ。
+        setLobbyStatus("対局に合流しています…");
+      } else {
+        renderRoom();
+      }
+    } else if (msg.type === "resume-game") {
+      resumeOnlineGame(msg);
     } else if (msg.type === "ready-toggle" && iAmHost) {
       const p = findPlayer(msg.peerId);
       if (p) p.ready = !p.ready;
@@ -257,10 +267,13 @@
   async function joinRoom(inputRoomId) {
     const profile = myProfile();
     setLobbyStatus("ルームに接続しています…");
+    // welcome の直後（対局中の再合流なら resume-game も）が届く前に
+    // ハンドラを確実に登録しておく。HRNet.joinRoom() の完了を待ってから
+    // 配線すると、その間に届いたメッセージを取りこぼす恐れがある。
+    wireNetworkEvents();
     const result = await window.HRNet.joinRoom(inputRoomId, profile);
     myPeerId = result.peerId;
     iAmHost = false;
-    wireNetworkEvents();
     setLobbyStatus("");
     // room-state はホストから届き次第 renderRoom() される
   }
@@ -414,6 +427,12 @@
           }
           room.players.sort((a, b) => a.joinOrder - b.joinOrder);
           mergeGhostInto(ghost, oldPeerId);
+          // 対局中にホストがこの再接続を検知した場合、ロビーへは通さず
+          // 今の対局のスナップショットをこの相手にだけ直接送る。
+          if (iAmHost && room.phase === "in-game" && typeof window.isOnlineGameActive === "function" && window.isOnlineGameActive()) {
+            const snap = window.getOnlineResumeSnapshot ? window.getOnlineResumeSnapshot() : null;
+            if (snap) window.HRNet.sendAppTo(netP.peerId, { type: "resume-game", ...snap });
+          }
         } else {
           room.players.push({
             peerId: netP.peerId,
@@ -462,6 +481,15 @@
 
   function beginOnlineGame(payload) {
     const board = deserializeBoard(payload.board);
+    // welcome の直後（対局中なら resume-game も）が届くタイミングでは
+    // まだ myPeerId 変数がセットされていない可能性があるため、
+    // network.js側の値を直接確認しておく（自分のIDを取り違えない）。
+    if (!myPeerId) myPeerId = window.HRNet.getMyPeerId();
+    // 自分がゲスト側で受け取った場合、自分自身の room オブジェクトにも
+    // 「対局中」を反映しておく。これをしないと、後でホスト引き継ぎが
+    // 起きた時（このゲストが新ホストになった時）に、まだロビー段階だと
+    // 誤認して、再接続してきた相手をロビーへ通してしまう。
+    if (room) room.phase = "in-game";
     if (typeof window.startOnlineHyperRobotsGame === "function") {
       window.startOnlineHyperRobotsGame({
         board,
@@ -476,6 +504,31 @@
         },
       });
     }
+    const overlay = el("title-screen");
+    if (overlay) overlay.classList.add("hidden");
+    document.body.classList.remove("title-active");
+  }
+
+  // 対局中に一度離脱し、同じルームIDで戻ってきたプレイヤーを、ロビーを
+  // 経由せず今の対局へ直接合流させる。ホストが resume-game で送って
+  // くれたスナップショットをそのまま復元するだけで、盤面やスコアを
+  // 新規に作り直したりはしない。
+  function resumeOnlineGame(payload) {
+    const board = deserializeBoard(payload.board);
+    if (!myPeerId) myPeerId = window.HRNet.getMyPeerId();
+    if (room) room.phase = "in-game";
+    if (typeof window.resumeOnlineHyperRobotsGame === "function") {
+      window.resumeOnlineHyperRobotsGame(
+        {
+          board,
+          myPeerId,
+          isHost: iAmHost,
+          net: { broadcast: (m) => window.HRNet.broadcastApp(m) },
+        },
+        payload
+      );
+    }
+    setLobbyStatus("");
     const overlay = el("title-screen");
     if (overlay) overlay.classList.add("hidden");
     document.body.classList.remove("title-active");

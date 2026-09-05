@@ -119,6 +119,9 @@
     let roomId = null;
     let hostPeerId = null; // 現在のホストの peerId
     let nextJoinOrder = 1; // ホスト側でのみ使う、参加順の採番カウンタ（減ることはない）
+    let myToken = null; // 自分自身のトークン（ホストから割り当てられたもの）。
+    // メッシュ内の他メンバーへ直接つなぎに行く時にも提示する必要がある
+    // （でないと、後でホスト権を引き継いだ相手が自分を再接続と認識できない）。
     // peers: peerId -> { peerId, profile, joinOrder, connected, conn(DataConnection|null), isCpu, token }
     const peers = new Map();
 
@@ -180,6 +183,7 @@
         // 参加直後：ホストから初期ピア一覧をもらう
         myJoinOrder = msg.you.joinOrder;
         hostPeerId = msg.hostPeerId;
+        myToken = msg.yourToken || myToken; // メッシュ接続にも載せられるよう、先に確定させておく
         msg.peerList.forEach((p) => {
           if (p.peerId === myPeerId) return;
           if (!peers.has(p.peerId)) {
@@ -224,6 +228,72 @@
       }
     }
 
+    let myProfileForHost = null; // hostRoom() で受け取ったプロフィール。ホスト引き継ぎ後の再接続受付でも使う。
+    let rendezvousPeer = null; // ホスト引き継ぎ後、元のホストの固定IDを引き継いで待ち受けるための２本目のPeer
+
+    // 新しい接続がホストとして受け入れられた時の共通処理。
+    // 通常の（自分の本来のPeerJS ID宛の）接続と、引き継ぎ後の「元ホストの
+    // 固定IDで待ち受けている、もう1本のrendezvousPeer」宛の接続の
+    // どちらからも呼ばれる。
+    function handleIncomingHostConnection(conn) {
+      // conn.metadata は接続が確立する前（"open"を待たず）から同期的に
+      // 読める。ここで「再接続かどうか」を判定してしまうことで、
+      // "hello"メッセージの到着タイミングに左右されなくなる。
+      const presentedToken = (conn.metadata && conn.metadata.token) || null;
+      const presentedProfile = (conn.metadata && conn.metadata.profile) || null;
+      const existingPeer = findPeerByToken(presentedToken);
+      const joinOrder = existingPeer ? existingPeer.joinOrder : nextJoinOrder++;
+      const assignedToken = existingPeer ? existingPeer.token : generateToken();
+      // wireConnection が自前で conn.on("open", ...) を登録するので、
+      // 「open」がまだ発火していないこのタイミング（connectionイベント
+      // ハンドラの同期処理内）で呼ぶ必要がある。open発火後にネストして
+      // 呼ぶと、その回のopenイベントを取りこぼしてしまう。
+      wireConnection(conn, joinOrder, presentedProfile, assignedToken);
+      conn.on("open", () => {
+        const p = peers.get(conn.peer);
+        if (p) { p.joinOrder = joinOrder; p.token = assignedToken; }
+        // 新規参加者に、既存ピア一覧（自分含む）を送る
+        const list = peerListArray()
+          .filter((x) => x.peerId !== conn.peer)
+          .concat([{ peerId: myPeerId, profile: myProfileForHost, joinOrder: myJoinOrder, connected: true, isCpu: false }]);
+        conn.send(
+          JSON.stringify({
+            type: "welcome",
+            hostPeerId: myPeerId,
+            peerList: list,
+            you: { joinOrder },
+            yourToken: assignedToken,
+          })
+        );
+        // 既存メンバーに新規参加を告知（各自が必要なら接続しにいく）
+        broadcast({ type: "peer-joined", peer: { peerId: conn.peer, profile: presentedProfile, joinOrder, connected: true } }, conn.peer);
+        emitter.emit("peer-list-changed", peerListArray());
+      });
+    }
+
+    // ホスト引き継ぎが起きた時、新ホストが「元々のホストの固定PeerJS ID」
+    // を２本目のPeerとして立ち上げ、そこでも接続を待ち受ける。
+    // こうしておくことで、対局中にタブを閉じて後から戻ってきたプレイヤー
+    // （ルームIDしか知らず、今の本当のホストの一時的なpeerIdは知らない）
+    // も、常に同じ「ルームID」宛に接続するだけで今のホストにたどり着ける。
+    function claimRendezvousIfNeeded() {
+      if (!isHost() || rendezvousPeer) return;
+      if (myPeerId === roomIdToPeerId(roomId)) return; // 自分が元々のホストなら、本体のpeerIdがそのまま入口なので不要
+      try {
+        const rp = new window.Peer(roomIdToPeerId(roomId));
+        rendezvousPeer = rp;
+        rp.on("connection", (conn) => handleIncomingHostConnection(conn));
+        rp.on("error", () => {
+          // 既に誰か（旧ホストがまだ生きている等）がそのIDを使っている場合等。
+          // 致命的ではない：メッシュ自体は今のホストで機能し続けるので、
+          // ここでは静かに諦める（再接続してくる相手が来た時にまた試す）。
+          rendezvousPeer = null;
+        });
+      } catch (e) {
+        rendezvousPeer = null;
+      }
+    }
+
     function maybeMigrateHost() {
       if (hostPeerId && peers.has(hostPeerId) && peers.get(hostPeerId).connected) return;
       // 自分自身も候補に含めて計算する
@@ -237,11 +307,18 @@
         if (isHost()) {
           // 新ホストは全員に通知する
           broadcast({ type: "host-migrated", newHostPeerId: hostPeerId });
+          claimRendezvousIfNeeded();
         }
       }
     }
 
     function wireConnection(conn, remoteJoinOrder, remoteProfile, remoteToken) {
+      // 明示的に渡されなかった場合は、接続時の metadata から補う
+      // （メッシュ内で自分から他メンバーへ接続しに行く側は、相手の
+      // joinOrder/profile/tokenをこの時点でまだ知らないことが多いが、
+      // metadata経由で相手側が自分の情報を教えてくれている）。
+      if (remoteToken === undefined && conn.metadata) remoteToken = conn.metadata.token || null;
+      if (remoteProfile === undefined && conn.metadata) remoteProfile = conn.metadata.profile || null;
       // 同じトークンを持つ既存エントリ（切断中のはず）があれば、それを
       // 新しい peerId に「引き継ぐ」形にする。古いキーのエントリをここで
       // 消しておかないと、再接続のたびにpeers Mapが増え続けてしまう。
@@ -308,7 +385,11 @@
           connected: false, conn: null, isCpu: false, connecting: true,
         });
       }
-      const conn = peer.connect(remotePeerId, { reliable: true });
+      // メッシュ内の他メンバーへの接続にも、自分のtoken・プロフィールを
+      // 載せておく。これをしないと、後でこの相手がホスト権を引き継いだ
+      // 時に「自分」を再接続として認識してもらえない
+      // （tokenがnullのまま登録されてしまうため）。
+      const conn = peer.connect(remotePeerId, { reliable: true, metadata: { profile: myProfileForHost, token: myToken } });
       wireConnection(conn);
     }
 
@@ -335,42 +416,9 @@
       roomId = peerIdToRoomId(myPeerId);
       hostPeerId = myPeerId;
       myJoinOrder = 0;
+      myProfileForHost = myProfile;
 
-      peer.on("connection", (conn) => {
-        // conn.metadata は接続が確立する前（"open"を待たず）から同期的に
-        // 読める。ここで「再接続かどうか」を判定してしまうことで、
-        // "hello"メッセージの到着タイミングに左右されなくなる。
-        const presentedToken = (conn.metadata && conn.metadata.token) || null;
-        const presentedProfile = (conn.metadata && conn.metadata.profile) || null;
-        const existingPeer = findPeerByToken(presentedToken);
-        const joinOrder = existingPeer ? existingPeer.joinOrder : nextJoinOrder++;
-        const assignedToken = existingPeer ? existingPeer.token : generateToken();
-        // wireConnection が自前で conn.on("open", ...) を登録するので、
-        // 「open」がまだ発火していないこのタイミング（connectionイベント
-        // ハンドラの同期処理内）で呼ぶ必要がある。open発火後にネストして
-        // 呼ぶと、その回のopenイベントを取りこぼしてしまう。
-        wireConnection(conn, joinOrder, presentedProfile, assignedToken);
-        conn.on("open", () => {
-          const p = peers.get(conn.peer);
-          if (p) { p.joinOrder = joinOrder; p.token = assignedToken; }
-          // 新規参加者に、既存ピア一覧（自分含む）を送る
-          const list = peerListArray()
-            .filter((x) => x.peerId !== conn.peer)
-            .concat([{ peerId: myPeerId, profile: myProfile, joinOrder: 0, connected: true, isCpu: false }]);
-          conn.send(
-            JSON.stringify({
-              type: "welcome",
-              hostPeerId: myPeerId,
-              peerList: list,
-              you: { joinOrder },
-              yourToken: assignedToken,
-            })
-          );
-          // 既存メンバーに新規参加を告知（各自が必要なら接続しにいく）
-          broadcast({ type: "peer-joined", peer: { peerId: conn.peer, profile: presentedProfile, joinOrder, connected: true } }, conn.peer);
-          emitter.emit("peer-list-changed", peerListArray());
-        });
-      });
+      peer.on("connection", (conn) => handleIncomingHostConnection(conn));
 
       peer.on("disconnected", () => {
         emitter.emit("broker-disconnected");
@@ -384,6 +432,7 @@
       if (!isValidRoomId(inputRoomId)) {
         throw new Error("ルームIDは5桁の数字で入力してください。");
       }
+      myProfileForHost = myProfile; // 将来ホスト引き継ぎが起きた時、rendezvousの応答に使う
       const targetPeerId = roomIdToPeerId(inputRoomId);
       const existingToken = getStoredToken(inputRoomId); // このルームに前に参加していれば、その時のトークン
       peer = await createPeerWithRetry(null, 0).catch(() => {
@@ -460,10 +509,19 @@
           // noop
         }
       }
+      if (rendezvousPeer) {
+        try {
+          rendezvousPeer.destroy();
+        } catch (e) {
+          // noop
+        }
+      }
       peer = null;
+      rendezvousPeer = null;
       myPeerId = null;
       hostPeerId = null;
       roomId = null;
+      myProfileForHost = null;
     }
 
     function sendApp(payload) {

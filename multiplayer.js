@@ -74,6 +74,74 @@
     orderedPlayers.forEach((p) => { mp.scores[p.peerId] = 0; });
   }
 
+  // 対局中に一度タブを閉じた／タイトルへ戻ったプレイヤーが同じルームIDで
+  // 戻ってきた場合に、ロビー画面を経由せず今の対局へ直接合流できるように
+  // するためのスナップショット。ホスト側でのみ呼ばれる。
+  function buildResumeSnapshot() {
+    if (!mp) return null;
+    return {
+      board: window.HROnline.serializeBoard(mp.board),
+      colorMode: mp.colors.length === 5 ? "five" : "four",
+      players: mp.players,
+      settings: mp.settings,
+      totalRounds: mp.totalRounds,
+      goalIndex: mp.goalIndex,
+      currentGoal: mp.currentGoal,
+      robots: mp.robots.map((p) => ({ ...p })),
+      scores: { ...mp.scores },
+      roundsPlayed: mp.roundsPlayed,
+      matchOver: mp.matchOver,
+      bestDeclare: mp.bestDeclare ? { ...mp.bestDeclare } : null,
+      countdownKind: mp.countdownKind,
+      countdownEndTime: mp.countdownEndTime,
+      giveUpPeerIds: Array.from(mp.giveUpVoters),
+      settingsForAnswerTimer: mp.settings.answerTimeLimit,
+    };
+  }
+
+  // buildResumeSnapshot() の内容から mp を復元する（新規開始の
+  // resetMpState と違い、進行中の状態をそのまま引き継ぐ）。
+  function resetMpStateFromSnapshot(cfg, snap) {
+    const colors = snap.colorMode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
+    const orderedPlayers = snap.players.slice().sort((a, b) => a.joinOrder - b.joinOrder);
+    mp = {
+      board: cfg.board,
+      colors,
+      players: orderedPlayers,
+      myPeerId: cfg.myPeerId,
+      isHost: cfg.isHost,
+      net: cfg.net,
+      settings: snap.settings,
+      targetQueue: [],
+      goalIndex: snap.goalIndex,
+      currentGoal: snap.currentGoal,
+      robots: snap.robots.map((p) => ({ ...p })),
+      robotEls: [],
+      cellEls: [],
+      selectedRobot: null,
+      arrowEls: [],
+      moveHistory: [],
+      historyIndex: 0,
+      roundStartSnapshot: snap.robots.map((p) => ({ ...p })),
+      scores: { ...snap.scores },
+      roundsPlayed: snap.roundsPlayed,
+      totalRounds: snap.totalRounds,
+      matchOver: snap.matchOver,
+      bestDeclare: snap.bestDeclare ? { ...snap.bestDeclare } : null,
+      declared: false,
+      myDeclaredMoves: null,
+      myGiveUpVoted: (snap.giveUpPeerIds || []).includes(cfg.myPeerId),
+      giveUpVoters: new Set(snap.giveUpPeerIds || []),
+      countdownKind: snap.countdownKind,
+      countdownInterval: null,
+      countdownRemaining: 0,
+      countdownEndTime: snap.countdownEndTime,
+      readyForNext: new Set(),
+      myReadyForNext: false,
+      locked: false,
+    };
+  }
+
   // ================= 盤面・ロボットの初期配置 =================
 
   function placeRobotsRandomly() {
@@ -1162,8 +1230,6 @@
     verifySubmission(msg);
   };
 
-  let controlsWired = false;
-
   function regenerateGame() {
     if (!mp.isHost) return;
     const ok = window.confirm("新しいマップを生成すると、現在のゲーム内容（得点・進行状況）はリセットされます。よろしいですか？");
@@ -1224,6 +1290,100 @@
     btn.classList.toggle("hidden", !mp.isHost);
   }
 
+  // 対局中に一度タブを閉じた／タイトルへ戻ったプレイヤーが、同じ
+  // ルームIDで戻ってきたときに、ロビー画面を経由せず今の対局へ
+  // そのまま合流するための入り口。startOnlineHyperRobotsGame との違いは
+  // 「盤面・ロボット位置・得点などを新規に作らず、ホストから届いた
+  // スナップショットをそのまま復元する」点だけ。
+  window.resumeOnlineHyperRobotsGame = function (cfg, snap) {
+    resetMpStateFromSnapshot(cfg, snap);
+    window.__HR_ONLINE_ACTIVE = true;
+    document.getElementById("solo-controls").classList.add("hidden");
+    document.getElementById("online-controls").classList.remove("hidden");
+    document.getElementById("online-hud").classList.remove("hidden");
+    updateNewMapButtonForOnline();
+
+    const playModeBadge = document.getElementById("play-mode-badge");
+    if (playModeBadge) playModeBadge.textContent = "オンライン対戦モード";
+    const colorModeBadge = document.getElementById("color-mode-badge");
+    if (colorModeBadge) colorModeBadge.textContent = snap.colorMode === "five" ? "5色モード" : "4色モード";
+    const diagonalBadge = document.getElementById("diagonal-mode-badge");
+    if (diagonalBadge) diagonalBadge.style.display = mp.settings && mp.settings.diagonals ? "" : "none";
+    const roomIdBadge = document.getElementById("room-id-badge");
+    if (roomIdBadge && window.HRNet && window.HRNet.getRoomId()) {
+      roomIdBadge.textContent = `ルームID: ${window.HRNet.getRoomId()}`;
+      roomIdBadge.classList.remove("hidden");
+    }
+
+    renderBoard();
+    renderRobots();
+    renderHud();
+    wireOnlineControlsOnce();
+
+    mp.robots.forEach((p, i) => setPercentPos(mp.robotEls[i], p.r, p.c));
+    if (mp.currentGoal) {
+      placeGoalIndicator();
+      refreshTargetEmphasis();
+      const shapeLabel = SHAPE_INFO[mp.currentGoal.shape].label;
+      const desc = mp.currentGoal.color === "rainbow"
+        ? `いずれかのロボットを${shapeLabel}のマスへ`
+        : `${COLOR_INFO[mp.currentGoal.color].label}ロボットを${shapeLabel}のマスへ`;
+      const goalDescEl = document.getElementById("goal-desc");
+      if (goalDescEl) goalDescEl.textContent = desc;
+      const goalIconEl = document.getElementById("goal-icon");
+      if (goalIconEl) {
+        goalIconEl.style.background = mp.currentGoal.color === "rainbow" ? "" : COLOR_INFO[mp.currentGoal.color].hex;
+        goalIconEl.className = `goal-icon shape-${mp.currentGoal.shape}${mp.currentGoal.color === "rainbow" ? " rainbow-fill" : ""}`;
+      }
+    }
+    updateGoalsRemaining();
+    updateMoveCount();
+    renderRaceStatus();
+    if (mp.countdownKind && mp.countdownEndTime > Date.now()) {
+      startCountdown(Math.ceil((mp.countdownEndTime - Date.now()) / 1000), mp.countdownKind === "declare" ? requestVerification : undefined);
+    }
+
+    const overlay = document.getElementById("title-screen");
+    if (overlay) overlay.classList.add("hidden");
+    document.body.classList.remove("title-active");
+  };
+
+  let controlsWired = false;
+  function wireOnlineControlsOnce() {
+    if (controlsWired) return;
+    controlsWired = true;
+    document.getElementById("board").addEventListener("click", () => {
+      if (mp.locked || mp.selectedRobot === null) return;
+      mp.robotEls[mp.selectedRobot].classList.remove("selected");
+      mp.selectedRobot = null;
+      clearArrows();
+    });
+
+    document.getElementById("btn-online-undo").addEventListener("click", undo);
+    document.getElementById("btn-online-redo").addEventListener("click", redo);
+    document.getElementById("btn-online-reset").addEventListener("click", resetToRoundStart);
+    document.getElementById("btn-online-declare").addEventListener("click", declare);
+    document.getElementById("btn-online-giveup").addEventListener("click", giveUp);
+    document.getElementById("btn-online-next-ready").addEventListener("click", nextRoundReady);
+    document.getElementById("btn-new-map").addEventListener("click", () => {
+      if (!window.__HR_ONLINE_ACTIVE || !mp || !mp.isHost) return;
+      regenerateGame();
+    });
+    window.HRNet.on("peer-disconnected", (peerId) => {
+      if (window.__HR_ONLINE_ACTIVE) showDisconnectBanner(peerId);
+    });
+    window.HRNet.on("peer-list-changed", () => {
+      // 対局中に誰かが切断／復帰した時、HUDと（表示中なら）準備確認の
+      // オーバーレイの表示をその場で最新の接続状況に合わせて更新する
+      if (!window.__HR_ONLINE_ACTIVE || !mp) return;
+      renderHud();
+      const overlay = document.getElementById("next-ready-overlay");
+      if (overlay && !overlay.classList.contains("hidden")) {
+        renderNextReadyPlayerList();
+      }
+    });
+  }
+
   window.startOnlineHyperRobotsGame = function (cfg) {
     resetMpState(cfg);
     window.__HR_ONLINE_ACTIVE = true;
@@ -1248,40 +1408,7 @@
     mp.robots = placeRobotsRandomly();
     renderRobots();
     renderHud();
-
-    if (!controlsWired) {
-      controlsWired = true;
-      document.getElementById("board").addEventListener("click", () => {
-        if (mp.locked || mp.selectedRobot === null) return;
-        mp.robotEls[mp.selectedRobot].classList.remove("selected");
-        mp.selectedRobot = null;
-        clearArrows();
-      });
-
-      document.getElementById("btn-online-undo").addEventListener("click", undo);
-      document.getElementById("btn-online-redo").addEventListener("click", redo);
-      document.getElementById("btn-online-reset").addEventListener("click", resetToRoundStart);
-      document.getElementById("btn-online-declare").addEventListener("click", declare);
-      document.getElementById("btn-online-giveup").addEventListener("click", giveUp);
-      document.getElementById("btn-online-next-ready").addEventListener("click", nextRoundReady);
-      document.getElementById("btn-new-map").addEventListener("click", () => {
-        if (!window.__HR_ONLINE_ACTIVE || !mp || !mp.isHost) return;
-        regenerateGame();
-      });
-      window.HRNet.on("peer-disconnected", (peerId) => {
-        if (window.__HR_ONLINE_ACTIVE) showDisconnectBanner(peerId);
-      });
-      window.HRNet.on("peer-list-changed", () => {
-        // 対局中に誰かが切断／復帰した時、HUDと（表示中なら）準備確認の
-        // オーバーレイの表示をその場で最新の接続状況に合わせて更新する
-        if (!window.__HR_ONLINE_ACTIVE || !mp) return;
-        renderHud();
-        const overlay = document.getElementById("next-ready-overlay");
-        if (overlay && !overlay.classList.contains("hidden")) {
-          renderNextReadyPlayerList();
-        }
-      });
-    }
+    wireOnlineControlsOnce();
 
     if (mp.isHost) {
       nextGoal();
@@ -1326,6 +1453,15 @@
   };
 
   // テスト用に内部状態を覗けるようにしておく
+  // 対局中に一度離脱したプレイヤーが同じルームで戻ってきたとき、
+  // ホスト側がロビーを経由せず今の対局へ直接合流させるために使う。
+  window.getOnlineResumeSnapshot = function () {
+    return buildResumeSnapshot();
+  };
+  window.isOnlineGameActive = function () {
+    return !!(mp && window.__HR_ONLINE_ACTIVE);
+  };
+
   window._HRMultiplayerDebug = {
     getState: () => mp,
     tickCountdownForTest: () => tickCountdown(),
