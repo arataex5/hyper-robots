@@ -755,7 +755,7 @@
     showMapGenOverlay();
     const generator = createIncrementalBoardGenerator({ useDiagonals: USE_DIAGONALS, colors: ACTIVE_COLORS });
     function step() {
-      const res = generator.step(20);
+      const res = generator.step(80);
       if (res.status === "done") {
         hideMapGenOverlay();
         board = res.board;

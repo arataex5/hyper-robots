@@ -1171,7 +1171,7 @@
     if (typeof window.showMapGenOverlay === "function") window.showMapGenOverlay();
     const generator = window.createIncrementalBoardGenerator({ useDiagonals: mp.settings.diagonals, colors: mp.colors });
     function step() {
-      const res = generator.step(20);
+      const res = generator.step(80);
       if (res.status !== "done") {
         setTimeout(step, 0);
         return;

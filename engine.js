@@ -385,7 +385,19 @@ function buildCandidateBoard() {
 function findAxisShapeViolations(lCorners) {
   const violations = [];
 
-  // 横方向の軸（同じ行）: 【冠】(N,N) と 【受け皿】(S,S)
+  // 「線対称」の判定: 2つの方向ペア(dir1,dir2)について、片方がdir1で
+  // もう片方がdir2、または その逆のどちらか（順序を問わない）であれば
+  // 「向き合っている」とみなす。
+  function hasOpposing(a, b, dir1, dir2) {
+    return (
+      (a.dirs.includes(dir1) && b.dirs.includes(dir2)) ||
+      (a.dirs.includes(dir2) && b.dirs.includes(dir1))
+    );
+  }
+
+  // 横方向の軸（同じ行）: 縦方向(N/S)が一致し、かつ横方向(E/W)が
+  // 線対称（どちらが左右でも向き合っていれば）になっている組み合わせ
+  // を禁止する。【冠】=N,N／【受け皿】=S,S。
   const byRow = new Map();
   lCorners.forEach((corner) => {
     if (!byRow.has(corner.r)) byRow.set(corner.r, []);
@@ -394,22 +406,23 @@ function findAxisShapeViolations(lCorners) {
   byRow.forEach((list, r) => {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        const left = list[i].c < list[j].c ? list[i] : list[j];
-        const right = list[i].c < list[j].c ? list[j] : list[i];
-        if (left.c === right.c) continue;
-        if (!left.dirs.includes("E") || !right.dirs.includes("W")) continue;
-        const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d));
-        if (vDir) {
+        const a = list[i], b = list[j];
+        if (a.c === b.c) continue;
+        const vDir = ["N", "S"].find((d) => a.dirs.includes(d) && b.dirs.includes(d));
+        if (!vDir) continue;
+        if (hasOpposing(a, b, "E", "W")) {
           violations.push({
             shape: vDir === "N" ? "冠" : "受け皿",
-            axis: "row", r, cLeft: left.c, cRight: right.c,
+            axis: "row", r, cLeft: Math.min(a.c, b.c), cRight: Math.max(a.c, b.c),
           });
         }
       }
     }
   });
 
-  // 縦方向の軸（同じ列）: 【コ】(E,E) と 【C】(W,W)
+  // 縦方向の軸（同じ列）: 横方向(E/W)が一致し、かつ縦方向(N/S)が
+  // 線対称（どちらが上下でも向き合っていれば）になっている組み合わせ
+  // を禁止する。【コ】=E,E／【C】=W,W。
   const byCol = new Map();
   lCorners.forEach((corner) => {
     if (!byCol.has(corner.c)) byCol.set(corner.c, []);
@@ -418,15 +431,14 @@ function findAxisShapeViolations(lCorners) {
   byCol.forEach((list, c) => {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        const top = list[i].r < list[j].r ? list[i] : list[j];
-        const bottom = list[i].r < list[j].r ? list[j] : list[i];
-        if (top.r === bottom.r) continue;
-        if (!top.dirs.includes("N") || !bottom.dirs.includes("S")) continue;
-        const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d));
-        if (hDir) {
+        const a = list[i], b = list[j];
+        if (a.r === b.r) continue;
+        const hDir = ["E", "W"].find((d) => a.dirs.includes(d) && b.dirs.includes(d));
+        if (!hDir) continue;
+        if (hasOpposing(a, b, "N", "S")) {
           violations.push({
             shape: hDir === "E" ? "コ" : "C",
-            axis: "col", c, rTop: top.r, rBottom: bottom.r,
+            axis: "col", c, rTop: Math.min(a.r, b.r), rBottom: Math.max(a.r, b.r),
           });
         }
       }
