@@ -293,24 +293,31 @@ function buildCandidateBoard() {
   // 各区画の外周付近のノッチ（中央寄りだが毎回位置が変わる）。1本ずつ完全に
   // 独立したグループとする。外枠に接しているため、外枠の暗黙の壁と合わせて
   // 実質的に2方向のL字コーナーとして扱う（形チェックの対象に含める）。
+  //
+  // 【重要】外周壁は実際の壁データを持たない「概念上の壁」であり、その
+  // 役割は「向かい合う辺」を演じること。例えば右端(c=15)にあるノッチが、
+  // 同じ行のもっと左側にある別のL字（東向きの壁を持つ）と「向かい合って
+  // 冠の形になる」ためには、このノッチ側は「西向き」を担う必要がある
+  // （盤面右端はその行にとっての『行き止まりの左向きの壁』として働く）。
+  // 逆に「東向き(自分の壁が右を塞ぐ)」を割り当ててしまうと、実際の壁
+  // データ上は同じ意味（hasE(r,15)はhasW(r,16)と同じ壁）でも、この形
+  // チェックが求める「向かい合う」関係を作れず、外周絡みの違反を
+  // 検出できなくなる。
   buildOuterNotchDefs().forEach(([r, c, dir], idx) => {
     addWallG(r, c, dir, `notch${idx}`);
-    const impliedEdgeDir = r === 0 ? "N" : r === 15 ? "S" : c === 0 ? "W" : "E";
+    const impliedEdgeDir = r === 0 ? "S" : r === 15 ? "N" : c === 0 ? "E" : "W";
     lCorners.push({ r, c, dirs: [dir, impliedEdgeDir] });
   });
 
   // ターゲット・レインボーのL字コーナーが、たまたま盤面の一番外側の
-  // 行／列（0行目・15行目・0列目・15列目）に位置している場合、外枠の
-  // 壁も「もう一辺」として扱う。ノッチは上ですでに対応済みだが、通常の
-  // L字コーナーにこれをしないと、「外周壁と組み合わさって冠・受け皿・
-  // コ・Cの形になる」パターン（外枠がもう片方の腕を担うケース）を
-  // 見逃してしまう。
+  // 行／列（0行目・15行目・0列目・15列目）に位置している場合も同様に、
+  // 外枠を「向かい合う辺」として扱う（上のノッチと同じ考え方）。
   lCorners.forEach((corner) => {
     const implied = [];
-    if (corner.r === 0 && !corner.dirs.includes("N")) implied.push("N");
-    if (corner.r === 15 && !corner.dirs.includes("S")) implied.push("S");
-    if (corner.c === 0 && !corner.dirs.includes("W")) implied.push("W");
-    if (corner.c === 15 && !corner.dirs.includes("E")) implied.push("E");
+    if (corner.r === 0 && !corner.dirs.includes("S")) implied.push("S");
+    if (corner.r === 15 && !corner.dirs.includes("N")) implied.push("N");
+    if (corner.c === 0 && !corner.dirs.includes("E")) implied.push("E");
+    if (corner.c === 15 && !corner.dirs.includes("W")) implied.push("W");
     if (implied.length > 0) corner.dirs = corner.dirs.concat(implied);
   });
 
@@ -321,6 +328,8 @@ function buildCandidateBoard() {
   // 2つのL字コーナー（例：コアのすぐ下の行に2つの目標が離れて並び、
   // どちらもコア側の壁を持たないが、実質的にコアが「共有の壁」の
   // 役割を果たして冠・受け皿の形になるケース）を見逃してしまう。
+  // （こちらは外周壁と違い、コア自身の実際の壁データと同じ意味になる
+  // ため、方向の入れ替えは不要。）
   const CORE_ADJACENT_IMPLIED = {
     "6,7": "S", "6,8": "S", // コアの真上
     "9,7": "N", "9,8": "N", // コアの真下
@@ -385,19 +394,10 @@ function buildCandidateBoard() {
 function findAxisShapeViolations(lCorners) {
   const violations = [];
 
-  // 「線対称」の判定: 2つの方向ペア(dir1,dir2)について、片方がdir1で
-  // もう片方がdir2、または その逆のどちらか（順序を問わない）であれば
-  // 「向き合っている」とみなす。
-  function hasOpposing(a, b, dir1, dir2) {
-    return (
-      (a.dirs.includes(dir1) && b.dirs.includes(dir2)) ||
-      (a.dirs.includes(dir2) && b.dirs.includes(dir1))
-    );
-  }
-
-  // 横方向の軸（同じ行）: 縦方向(N/S)が一致し、かつ横方向(E/W)が
-  // 線対称（どちらが左右でも向き合っていれば）になっている組み合わせ
-  // を禁止する。【冠】=N,N／【受け皿】=S,S。
+  // 横方向の軸（同じ行）: 左のコーナーが右（E）を、右のコーナーが左
+  // （W）を向いて「向かい合っている」（面と面）組み合わせだけを禁止する。
+  // 背中合わせ（外向き）はOK。縦方向(N/S)は両方とも同じ向きで一致して
+  // いる必要がある。【冠】=N,N／【受け皿】=S,S。
   const byRow = new Map();
   lCorners.forEach((corner) => {
     if (!byRow.has(corner.r)) byRow.set(corner.r, []);
@@ -406,23 +406,25 @@ function findAxisShapeViolations(lCorners) {
   byRow.forEach((list, r) => {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        const a = list[i], b = list[j];
-        if (a.c === b.c) continue;
-        const vDir = ["N", "S"].find((d) => a.dirs.includes(d) && b.dirs.includes(d));
-        if (!vDir) continue;
-        if (hasOpposing(a, b, "E", "W")) {
+        const left = list[i].c < list[j].c ? list[i] : list[j];
+        const right = list[i].c < list[j].c ? list[j] : list[i];
+        if (left.c === right.c) continue;
+        if (!left.dirs.includes("E") || !right.dirs.includes("W")) continue;
+        const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d));
+        if (vDir) {
           violations.push({
             shape: vDir === "N" ? "冠" : "受け皿",
-            axis: "row", r, cLeft: Math.min(a.c, b.c), cRight: Math.max(a.c, b.c),
+            axis: "row", r, cLeft: left.c, cRight: right.c,
           });
         }
       }
     }
   });
 
-  // 縦方向の軸（同じ列）: 横方向(E/W)が一致し、かつ縦方向(N/S)が
-  // 線対称（どちらが上下でも向き合っていれば）になっている組み合わせ
-  // を禁止する。【コ】=E,E／【C】=W,W。
+  // 縦方向の軸（同じ列）: 上のコーナーが下（S）を、下のコーナーが上
+  // （N）を向いて「向かい合っている」（面と面）組み合わせだけを禁止する。
+  // 背中合わせ（外向き）はOK。横方向(E/W)は両方とも同じ向きで一致して
+  // いる必要がある。【コ】=E,E／【C】=W,W。
   const byCol = new Map();
   lCorners.forEach((corner) => {
     if (!byCol.has(corner.c)) byCol.set(corner.c, []);
@@ -431,14 +433,15 @@ function findAxisShapeViolations(lCorners) {
   byCol.forEach((list, c) => {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        const a = list[i], b = list[j];
-        if (a.r === b.r) continue;
-        const hDir = ["E", "W"].find((d) => a.dirs.includes(d) && b.dirs.includes(d));
-        if (!hDir) continue;
-        if (hasOpposing(a, b, "N", "S")) {
+        const top = list[i].r < list[j].r ? list[i] : list[j];
+        const bottom = list[i].r < list[j].r ? list[j] : list[i];
+        if (top.r === bottom.r) continue;
+        if (!top.dirs.includes("S") || !bottom.dirs.includes("N")) continue;
+        const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d));
+        if (hDir) {
           violations.push({
             shape: hDir === "E" ? "コ" : "C",
-            axis: "col", c, rTop: Math.min(a.r, b.r), rBottom: Math.max(a.r, b.r),
+            axis: "col", c, rTop: top.r, rBottom: bottom.r,
           });
         }
       }
