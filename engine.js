@@ -322,10 +322,23 @@ function buildCandidateBoard() {
     // 壁が担う暗黙の方向は、実際にその位置がブロックしている自然な方向
     // （右端(c=15)なら東・左端(c=0)なら西・上端(r=0)なら北・下端(r=15)
     // なら南）とそのまま一致する。
+    //
+    // ノッチの壁は、その両側にある2つの行（または列）から共有される、
+    // 物理的に同一の壁である（例：dir="S"のノッチは「自分の行の南側」
+    // であると同時に「1つ下の行の北側」でもある）。ノッチにはターゲット
+    // のような「持ち主のマス」が無いため、この形チェックでは「壁が
+    // 実際にどちら側の行・列の目標と組み合わさって見えるか」に合わせて、
+    // もう一方の行・列側から見た向き（S→N、E→Wのように反対の向き）で
+    // 登録する。
     notchDefs.forEach(([r, c, dir], idx) => {
       addWallG(r, c, dir, `notch${idx}`);
-      const impliedEdgeDir = r === 0 ? "N" : r === 15 ? "S" : c === 0 ? "W" : "E";
-      lCorners.push({ r, c, dirs: [dir, impliedEdgeDir], source: { type: "notch", idx } });
+      let nr = r, nc = c, ndir = dir;
+      if (dir === "S") { nr = r + 1; ndir = "N"; }
+      else if (dir === "N") { nr = r - 1; ndir = "S"; }
+      else if (dir === "E") { nc = c + 1; ndir = "W"; }
+      else if (dir === "W") { nc = c - 1; ndir = "E"; }
+      const impliedEdgeDir = nr === 0 ? "N" : nr === 15 ? "S" : nc === 0 ? "W" : "E";
+      lCorners.push({ r: nr, c: nc, dirs: [ndir, impliedEdgeDir], source: { type: "notch", idx } });
     });
 
     // ターゲット・レインボーのL字コーナーが、たまたま盤面の一番外側の
@@ -378,7 +391,19 @@ function buildCandidateBoard() {
   // 違反の一方を修正する: 区画由来のコーナーなら、その区画を90度回転
   // （回転値を1つ進める）。ノッチ同士の衝突（区画に属さない）の場合は、
   // 区画の回転では直せないのでノッチ配置を全て引き直す。
-  function fixViolation(violation) {
+  // 一定回数（SHAKE_INTERVAL）修正を試みても収束しない場合は、局所的な
+  // 「行き来」（AとBの衝突を直すとBとCの衝突が生まれ、Cを直すとAに
+  // 戻る…といった振動）に陥っている可能性があるため、全区画の回転を
+  // まとめて引き直し、探索の起点を変える。
+  const SHAKE_INTERVAL = 40;
+  function fixViolation(violation, iter) {
+    if (iter > 0 && iter % SHAKE_INTERVAL === 0) {
+      CORNERS.forEach((corner) => {
+        quadrantStates[corner.key].k = randInt(4);
+      });
+      notchDefs = buildOuterNotchDefs();
+      return;
+    }
     const pick = violation.a.source.type === "quadrant" ? violation.a : violation.b;
     if (pick.source.type === "quadrant") {
       const st = quadrantStates[pick.source.key];
@@ -393,11 +418,11 @@ function buildCandidateBoard() {
     return { valid: false, ...state };
   }
 
-  const MAX_FIX_ITERATIONS = 400;
+  const MAX_FIX_ITERATIONS = 2000;
   for (let iter = 0; iter < MAX_FIX_ITERATIONS; iter++) {
     const colViolation = findFirstColumnViolation(state.lCorners);
     if (colViolation) {
-      fixViolation(colViolation);
+      fixViolation(colViolation, iter);
       state = rebuild();
       if (!checkVertexGroups(state) || !checkMaxTargetsPerLine(state.targets)) {
         return { valid: false, ...state };
@@ -406,7 +431,7 @@ function buildCandidateBoard() {
     }
     const rowViolation = findFirstRowViolation(state.lCorners);
     if (rowViolation) {
-      fixViolation(rowViolation);
+      fixViolation(rowViolation, iter);
       state = rebuild();
       if (!checkVertexGroups(state) || !checkMaxTargetsPerLine(state.targets)) {
         return { valid: false, ...state };
