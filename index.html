@@ -118,6 +118,16 @@
               <button type="button" class="mini-option" data-value="off">決着で終了</button>
             </div>
           </div>
+          <div class="room-setting-row room-setting-reveal" id="room-setting-suddendeath-row">
+            <div class="room-setting-label-row">
+              <span class="room-setting-label">サドンデス</span>
+              <span class="setting-help" tabindex="0" data-tooltip="最後のお題が終わった時点で1位が複数人いた場合、1位が一人に決まるまでランダムなお題で対戦を延長するかどうかの設定です。">？</span>
+            </div>
+            <div class="room-setting-options" id="room-setting-suddendeath">
+              <button type="button" class="mini-option" data-value="on">あり</button>
+              <button type="button" class="mini-option selected" data-value="off">なし</button>
+            </div>
+          </div>
           <div class="room-setting-row">
             <div class="room-setting-label-row">
               <span class="room-setting-label">次の問題への準備確認</span>
@@ -192,6 +202,20 @@
 
     <div id="big-countdown-display" class="big-countdown-display hidden"></div>
     <div id="race-flash-banner" class="race-flash-banner"></div>
+    <div id="match-over-banner" class="race-flash-banner match-over-banner"></div>
+    <div id="return-title-banner" class="race-flash-banner return-title-banner"></div>
+
+    <div id="result-screen-overlay" class="result-screen-overlay hidden">
+      <div class="result-screen-box">
+        <h2 class="result-screen-heading">リザルト</h2>
+        <div class="result-screen-list" id="result-screen-list"></div>
+        <div class="result-screen-actions">
+          <button type="button" class="btn" id="btn-result-back-title">タイトルへ戻る</button>
+          <button type="button" class="btn btn-primary" id="btn-result-rematch">もう一度遊ぶ</button>
+        </div>
+        <div class="result-screen-rematch-status" id="result-screen-rematch-status"></div>
+      </div>
+    </div>
 
     <div id="goal-reveal-banner" class="goal-reveal-banner">
       <div class="goal-reveal-banner-icon" id="goal-reveal-banner-icon"></div>

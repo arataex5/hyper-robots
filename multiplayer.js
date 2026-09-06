@@ -75,6 +75,8 @@
       aloneTimer: null, // 自分一人になってからソロモード提案までの15秒待ちタイマー
       aloneHandled: false, // 今回の「一人になった期間」について、既に提案済み（待機する/切替済み）かどうか
       soloSuggestOverlayHiddenNextReady: false, // 提案ダイアログを出すために準備確認画面を一時的に隠したかどうか
+      suddenDeathActive: false, // サドンデス中かどうか
+      rematchVoters: new Set(), // リザルト画面で「もう一度遊ぶ」を押した人（ホスト側のみで使う集計用）
     };
     orderedPlayers.forEach((p) => { mp.scores[p.peerId] = 0; });
   }
@@ -148,6 +150,8 @@
       aloneTimer: null,
       aloneHandled: false,
       soloSuggestOverlayHiddenNextReady: false,
+      suddenDeathActive: false,
+      rematchVoters: new Set(),
     };
   }
 
@@ -510,6 +514,19 @@
 
   function nextGoal() {
     if (!mp.isHost || mp.matchOver) return;
+    if (mp.suddenDeathActive) {
+      // サドンデス中はマップは変えず、これまでのお題と違うものを
+      // ランダムに選び続ける。
+      const candidates = mp.board.targets.filter(
+        (t) => !(mp.currentGoal && t.r === mp.currentGoal.r && t.c === mp.currentGoal.c && t.color === mp.currentGoal.color && t.shape === mp.currentGoal.shape)
+      );
+      const pool = candidates.length > 0 ? candidates : mp.board.targets;
+      const goal = pool[Math.floor(Math.random() * pool.length)];
+      mp.goalIndex++;
+      mp.net.broadcast({ type: "goal-reveal", goal, robots: mp.robots, goalIndex: mp.goalIndex });
+      applyGoalReveal(goal, mp.robots, mp.goalIndex);
+      return;
+    }
     mp.goalIndex++;
     if (mp.goalIndex >= mp.targetQueue.length) {
       endMatch();
@@ -524,20 +541,166 @@
   function endMatch() {
     if (!mp.isHost) return;
     mp.matchOver = true;
-    const topScore = Math.max(...mp.players.map((pl) => mp.scores[pl.peerId] || 0));
-    const winners = mp.players.filter((pl) => (mp.scores[pl.peerId] || 0) === topScore);
-    const winnerText = winners.map((w) => w.name || "プレイヤー").join("・");
-    const msg = { type: "match-over", scores: mp.scores, winnerText };
+    const { winners, allTied } = determineWinnerInfo();
+    if (mp.settings.suddenDeath && winners.length > 1) {
+      startSuddenDeath();
+      return;
+    }
+    const winnerIds = winners.map((w) => w.peerId);
+    const msg = { type: "match-over", scores: mp.scores, winnerIds, allTied };
     mp.net.broadcast(msg);
     applyMatchOver(msg);
+  }
+
+  // サドンデスの開始（1位が複数いた場合）。マップ・盤面はそのまま、
+  // 「サドンデス」の大きな告知の後、サドンデス用の準備確認画面へ進む。
+  function startSuddenDeath() {
+    mp.suddenDeathActive = true;
+    mp.matchOver = false;
+    mp.net.broadcast({ type: "sudden-death-start" });
+    applySuddenDeathStart();
+  }
+
+  function applySuddenDeathStart() {
+    mp.suddenDeathActive = true;
+    mp.matchOver = false;
+    const banner = document.getElementById("match-over-banner");
+    flashText(banner, "サドンデス");
+    setTimeout(() => awaitNextRoundReady(), 2300);
+  }
+
+  // 現時点の得点から、1位のプレイヤー（複数なら同点）と、
+  // 全員が同点かどうかを求める。
+  function determineWinnerInfo() {
+    const topScore = Math.max(...mp.players.map((pl) => mp.scores[pl.peerId] || 0));
+    const winners = mp.players.filter((pl) => (mp.scores[pl.peerId] || 0) === topScore);
+    const allTied = winners.length === mp.players.length && mp.players.length > 1;
+    return { winners, allTied };
+  }
+
+  function winnerBannerText(winners, allTied) {
+    if (allTied) return "引き分け";
+    if (winners.length === 1) return `${winners[0].name || "プレイヤー"}さんの勝利！`;
+    return winners.map((w) => `${w.name || "プレイヤー"}さん`).join("、") + "の勝利！";
   }
 
   function applyMatchOver(msg) {
     mp.matchOver = true;
     mp.scores = msg.scores;
     finalizeMatchOverUI();
-    setStatus(`🏁 すべてのゴールが終了しました！ 優勝: ${msg.winnerText}`);
+    const winners = mp.players.filter((p) => (msg.winnerIds || []).includes(p.peerId));
     renderHud();
+    showMatchOverSequence(winners, !!msg.allTied);
+  }
+
+  // デカデカと勝者を告知したあと、リザルト画面を表示する一連の流れ。
+  function showMatchOverSequence(winners, allTied) {
+    const banner = document.getElementById("match-over-banner");
+    flashText(banner, winnerBannerText(winners, allTied));
+    setTimeout(() => showResultScreen(), 2300);
+  }
+
+  function showResultScreen() {
+    const overlay = document.getElementById("result-screen-overlay");
+    const list = document.getElementById("result-screen-list");
+    if (!overlay || !list) return;
+    list.innerHTML = "";
+    const sorted = mp.players.slice().sort((a, b) => (mp.scores[b.peerId] || 0) - (mp.scores[a.peerId] || 0));
+    let rank = 0;
+    let prevScore = null;
+    sorted.forEach((p, idx) => {
+      const score = mp.scores[p.peerId] || 0;
+      if (score !== prevScore) { rank = idx + 1; prevScore = score; }
+      const row = document.createElement("div");
+      row.className = "result-screen-row";
+      const rankEl = document.createElement("span");
+      rankEl.className = "result-screen-rank";
+      rankEl.textContent = `${rank}位`;
+      const avatar = document.createElement("div");
+      avatar.className = "result-screen-avatar";
+      if (typeof window.renderProfileAvatar === "function") window.renderProfileAvatar(avatar, p.profile);
+      const name = document.createElement("span");
+      name.className = "result-screen-name";
+      name.textContent = p.name || "プレイヤー";
+      const scoreEl = document.createElement("span");
+      scoreEl.className = "result-screen-score";
+      scoreEl.textContent = `${score}点`;
+      row.appendChild(rankEl);
+      row.appendChild(avatar);
+      row.appendChild(name);
+      row.appendChild(scoreEl);
+      list.appendChild(row);
+    });
+    mp.rematchVoters = new Set();
+    renderRematchStatus();
+    const rematchBtn = document.getElementById("btn-result-rematch");
+    if (rematchBtn) rematchBtn.disabled = false;
+    overlay.classList.remove("hidden");
+  }
+
+  // ================= リザルト画面：もう一度遊ぶ／タイトルへ戻る =================
+
+  function clickRematch() {
+    if (mp.rematchVoters.has(mp.myPeerId)) return;
+    mp.rematchVoters.add(mp.myPeerId);
+    const btn = document.getElementById("btn-result-rematch");
+    if (btn) btn.disabled = true;
+    renderRematchStatus();
+    const msg = { type: "rematch-vote", peerId: mp.myPeerId };
+    if (mp.isHost) applyRematchVote(msg);
+    else mp.net.broadcast(msg);
+  }
+
+  function applyRematchVote(msg) {
+    if (!mp.isHost) return;
+    mp.rematchVoters.add(msg.peerId);
+    const tally = { type: "rematch-tally", voterIds: Array.from(mp.rematchVoters) };
+    mp.net.broadcast(tally);
+    applyRematchTally(tally);
+    const allIds = mp.players.map((p) => p.peerId);
+    if (allIds.length > 0 && allIds.every((id) => mp.rematchVoters.has(id))) {
+      mp.net.broadcast({ type: "rematch-start" });
+      applyRematchStart();
+    }
+  }
+
+  function applyRematchTally(msg) {
+    mp.rematchVoters = new Set(msg.voterIds);
+    renderRematchStatus();
+  }
+
+  function renderRematchStatus() {
+    const el = document.getElementById("result-screen-rematch-status");
+    if (!el) return;
+    const names = Array.from(mp.rematchVoters).map((id) => {
+      const p = mp.players.find((x) => x.peerId === id);
+      return p ? p.name || "プレイヤー" : "?";
+    });
+    el.textContent = names.length > 0 ? `準備OK: ${names.join("、")}` : "";
+  }
+
+  // 同じルームID・同じホスト・同じメンバーのまま、ルーム設定画面へ戻る。
+  function applyRematchStart() {
+    const overlay = document.getElementById("result-screen-overlay");
+    if (overlay) overlay.classList.add("hidden");
+    window.__HR_ONLINE_ACTIVE = false;
+    if (typeof window.HROnline === "object" && typeof window.HROnline.returnToRoomAfterMatch === "function") {
+      window.HROnline.returnToRoomAfterMatch();
+    }
+  }
+
+  function clickBackToTitleFromResult() {
+    mp.net.broadcast({ type: "match-back-to-title" });
+    applyBackToTitleBroadcast();
+  }
+
+  function applyBackToTitleBroadcast() {
+    const banner = document.getElementById("return-title-banner");
+    flashText(banner, "いずれかのプレイヤーによってタイトルへ戻るボタンが押されました。タイトルへ戻ります。");
+    setTimeout(() => {
+      const btn = document.getElementById("btn-back-title");
+      if (btn) btn.click();
+    }, 2000);
   }
 
   // 対戦終了時の画面まわりの後始末（早期決着・全ゴール消化の両方から呼ばれる）
@@ -730,13 +893,29 @@
       const nameForUpdate = isSelf ? "" : `${name}さんが`;
       text = `${nameForUpdate}${moveCount}手で記録更新！`;
     }
+    flashText(banner, text);
+  }
+
+  // ギブアップを押した瞬間の、デカデカとした一瞬の告知。
+  function showGiveUpFlashBanner(peerId) {
+    const banner = document.getElementById("race-flash-banner");
+    if (!banner) return;
+    const p = mp.players.find((x) => x.peerId === peerId);
+    const name = p ? p.name || "プレイヤー" : "プレイヤー";
+    flashText(banner, `${name}さんがギブアップしました。`);
+  }
+
+  // race-flash-banner を指定テキストで一瞬表示する共通処理。表示中は
+  // 勝敗判定までの大きな残り時間表示を一時的に透明にする。
+  function flashText(banner, html) {
+    const countdownEl = document.getElementById("big-countdown-display");
     const textEl = banner.querySelector(".race-flash-banner-text") || (() => {
       const el = document.createElement("div");
       el.className = "race-flash-banner-text";
       banner.appendChild(el);
       return el;
     })();
-    textEl.innerHTML = text;
+    textEl.innerHTML = html;
     banner.classList.remove("show");
     // eslint-disable-next-line no-unused-expressions
     void banner.offsetWidth;
@@ -894,8 +1073,29 @@
         moves: replayMoves,
         startSnapshot: mp.roundStartSnapshot.map((p) => ({ ...p })),
       };
-      const decided = !mp.settings.playUntilEnd && isOutcomeDecided();
-      mp.net.broadcast({
+      let decided = !mp.settings.playUntilEnd && isOutcomeDecided();
+      let winnerIds = null;
+      let allTied = false;
+      let suddenDeathContinues = false;
+      if (mp.suddenDeathActive) {
+        // サドンデス中は「逆転不可能かどうか」ではなく、この時点で
+        // 1位が一人に決まったかどうかで終了判定を行う。
+        const info = determineWinnerInfo();
+        if (info.winners.length === 1) {
+          decided = true;
+          mp.suddenDeathActive = false;
+          winnerIds = info.winners.map((w) => w.peerId);
+          allTied = info.allTied;
+        } else {
+          decided = false;
+          suddenDeathContinues = true;
+        }
+      } else if (decided) {
+        const info = determineWinnerInfo();
+        winnerIds = info.winners.map((w) => w.peerId);
+        allTied = info.allTied;
+      }
+      const payload = {
         type: "round-result",
         winnerId: msg.peerId,
         moveCount: msg.moves.length,
@@ -903,8 +1103,12 @@
         roundsPlayed: mp.roundsPlayed,
         matchOver: decided,
         championRoute: mp.lastChampionRoute,
-      });
-      applyRoundResult({ winnerId: msg.peerId, moveCount: msg.moves.length, scores: mp.scores, roundsPlayed: mp.roundsPlayed, matchOver: decided, championRoute: mp.lastChampionRoute });
+        winnerIds,
+        allTied,
+        suddenDeathContinues,
+      };
+      mp.net.broadcast(payload);
+      applyRoundResult(payload);
       if (decided) {
         mp.matchOver = true;
       }
@@ -956,11 +1160,12 @@
     const p = mp.players.find((x) => x.peerId === msg.winnerId);
     if (msg.matchOver) {
       mp.matchOver = true;
+      mp.suddenDeathActive = false;
       finalizeMatchOverUI();
-      const topScore = Math.max(...mp.players.map((pl) => mp.scores[pl.peerId] || 0));
-      const winner = mp.players.find((pl) => (mp.scores[pl.peerId] || 0) === topScore);
-      setStatus(`🎉 ${p ? p.name : "?"} が ${msg.moveCount}手でクリア！ 逆転不可能のため対戦終了 — 優勝: ${winner ? winner.name : "?"}`);
+      setStatus(`🎉 ${p ? p.name : "?"} が ${msg.moveCount}手でクリア！`);
       renderHud();
+      const winners = mp.players.filter((pl) => (msg.winnerIds || []).includes(pl.peerId));
+      showRoundResultBanner(`${p ? p.name : "?"}さんが1ポイント獲得！`, () => showMatchOverSequence(winners, !!msg.allTied));
     } else {
       setStatus(`🎉 ${p ? p.name : "?"} が ${msg.moveCount}手でクリア！`);
       renderHud();
@@ -1032,6 +1237,9 @@
     if (!mp.isHost) return;
     mp.giveUpVoters.add(msg.peerId);
     renderHud(); // ホスト自身の画面にもすぐ反映する
+    const flash = { type: "giveup-flash", peerId: msg.peerId };
+    mp.net.broadcast(flash);
+    showGiveUpFlashBanner(msg.peerId);
 
     if (mp.bestDeclare) {
       const tally = { type: "giveup-concede-tally", giveUpPeerIds: Array.from(mp.giveUpVoters) };
@@ -1300,6 +1508,12 @@
     mp.myReadyForNext = false;
     const overlay = document.getElementById("next-ready-overlay");
     if (overlay) overlay.classList.remove("hidden");
+    const heading = document.querySelector(".next-ready-heading");
+    if (heading) {
+      heading.textContent = mp.suddenDeathActive
+        ? "サドンデス！準備はいいですか？"
+        : "次の問題へ進む準備はいいですか？";
+    }
     const btn = document.getElementById("btn-online-next-ready");
     if (btn) btn.disabled = false;
     const replayBtn = document.getElementById("btn-watch-champion-replay");
@@ -1472,6 +1686,8 @@
       applyRoundInvalid(msg);
     } else if (msg.type === "giveup-vote") {
       if (mp.isHost) applyGiveUpVote(msg);
+    } else if (msg.type === "giveup-flash") {
+      if (!mp.isHost) showGiveUpFlashBanner(msg.peerId); // ホストは投票処理時に自分で既に表示済み
     } else if (msg.type === "giveup-concede-tally") {
       applyGiveUpConcedeTally(msg);
     } else if (msg.type === "giveup-countdown-start") {
@@ -1489,6 +1705,16 @@
       if (!mp.isHost) startDisplayCountdown(msg.endTime);
     } else if (msg.type === "match-over") {
       applyMatchOver(msg);
+    } else if (msg.type === "sudden-death-start") {
+      applySuddenDeathStart();
+    } else if (msg.type === "rematch-vote") {
+      if (mp.isHost) applyRematchVote(msg);
+    } else if (msg.type === "rematch-tally") {
+      applyRematchTally(msg);
+    } else if (msg.type === "rematch-start") {
+      applyRematchStart();
+    } else if (msg.type === "match-back-to-title") {
+      applyBackToTitleBroadcast();
     }
   };
 
@@ -1646,6 +1872,8 @@
     document.getElementById("btn-switch-to-solo").addEventListener("click", switchToSoloMode);
     document.getElementById("btn-solo-suggest-wait").addEventListener("click", onSoloSuggestWait);
     document.getElementById("btn-solo-suggest-switch").addEventListener("click", onSoloSuggestSwitch);
+    document.getElementById("btn-result-rematch").addEventListener("click", clickRematch);
+    document.getElementById("btn-result-back-title").addEventListener("click", clickBackToTitleFromResult);
     document.getElementById("btn-new-map").addEventListener("click", () => {
       if (!window.__HR_ONLINE_ACTIVE || !mp || !mp.isHost) return;
       regenerateGame();
@@ -1775,5 +2003,6 @@
   window._HRMultiplayerDebug = {
     getState: () => mp,
     tickCountdownForTest: () => tickCountdown(),
+    triggerEndMatchForTest: () => endMatch(),
   };
 })();

@@ -23,6 +23,7 @@
     playUntilEnd: true,
     nextReadyTimeout: 30, // 秒数 | "unlimited"（時間制限なし） | "off"（準備確認自体をしない）
     showBigCountdown: true, // 勝敗判定までの残り時間を、画面中央上側にデカデカと表示するかどうか
+    suddenDeath: false, // 最後のお題終了時、1位が複数いた場合にサドンデスへ突入するかどうか（「最後まで続ける」がonの時のみ有効）
   };
 
   let room = null; // { roomId, roomName, hostPeerId, settings, players: [...], phase }
@@ -138,6 +139,18 @@
         btn.classList.toggle("selected", btn.dataset.value === val);
       });
     }
+    const suddenDeathRow = el("room-setting-suddendeath-row");
+    if (suddenDeathRow) {
+      // 「最後まで続ける」がonの時だけ、サドンデス設定をニュルっと表示する
+      suddenDeathRow.classList.toggle("collapsed", !room.settings.playUntilEnd);
+    }
+    const suddenDeathGroup = el("room-setting-suddendeath");
+    if (suddenDeathGroup) {
+      const val = room.settings.suddenDeath ? "on" : "off";
+      Array.from(suddenDeathGroup.children).forEach((btn) => {
+        btn.classList.toggle("selected", btn.dataset.value === val);
+      });
+    }
     const nextReadyGroup = el("room-setting-nextready");
     if (nextReadyGroup) {
       const val = String(room.settings.nextReadyTimeout);
@@ -247,6 +260,7 @@
       msg.type === "round-invalid" ||
       msg.type === "verify-request" ||
       msg.type === "giveup-vote" ||
+      msg.type === "giveup-flash" ||
       msg.type === "giveup-concede-tally" ||
       msg.type === "giveup-countdown-start" ||
       msg.type === "giveup-cancelled" ||
@@ -254,7 +268,12 @@
       msg.type === "next-ready" ||
       msg.type === "next-ready-tally" ||
       msg.type === "nextready-countdown-start" ||
-      msg.type === "match-over"
+      msg.type === "match-over" ||
+      msg.type === "sudden-death-start" ||
+      msg.type === "rematch-vote" ||
+      msg.type === "rematch-tally" ||
+      msg.type === "rematch-start" ||
+      msg.type === "match-back-to-title"
     ) {
       handleGameMessage(msg);
     } else if (msg.type === "verify-submit" && iAmHost) {
@@ -605,6 +624,32 @@
     document.body.classList.remove("title-active");
   }
 
+  // 対戦終了後の「もう一度遊ぶ」：同じルームID・同じホスト・同じ
+  // メンバーのまま、ロビー（ルーム設定画面）へ戻す。
+  function returnToRoomAfterMatch() {
+    if (!room) return;
+    room.phase = "lobby";
+    room.players.forEach((p) => { p.ready = false; });
+    if (typeof window.stopOnlineGame === "function") window.stopOnlineGame();
+
+    // 対局中に使っていたゲーム画面まわりのUIを隠す
+    ["online-controls", "online-hud", "next-ready-overlay", "result-screen-overlay", "solo-suggest-overlay"].forEach((id) => {
+      const elx = document.getElementById(id);
+      if (elx) elx.classList.add("hidden");
+    });
+
+    // タイトル側のオーバーレイを再表示し、ルーム画面まで戻す
+    const overlay = el("title-screen");
+    if (overlay) overlay.classList.remove("hidden");
+    document.body.classList.add("title-active");
+    document.querySelectorAll(".title-screen-panel").forEach((panel) => {
+      panel.classList.toggle("hidden", panel.id !== "screen-room");
+    });
+
+    renderRoom();
+    if (iAmHost) broadcastRoomState();
+  }
+
   function handleGameMessage(msg) {
     if (typeof window.handleOnlineGameMessage === "function") {
       window.handleOnlineGameMessage(msg);
@@ -625,6 +670,7 @@
       ["room-setting-diagonals", "diagonals", (v) => v === "on"],
       ["room-setting-timelimit", "answerTimeLimit", (v) => Number(v)],
       ["room-setting-playuntilend", "playUntilEnd", (v) => v === "on"],
+      ["room-setting-suddendeath", "suddenDeath", (v) => v === "on"],
       ["room-setting-nextready", "nextReadyTimeout", (v) => (v === "unlimited" || v === "off" ? v : Number(v))],
       ["room-setting-bigcountdown", "showBigCountdown", (v) => v === "on"],
     ].forEach(([groupId, key, transform]) => {
@@ -659,6 +705,7 @@
     setLobbyStatus,
     setRoomStatus,
     serializeBoard,
+    returnToRoomAfterMatch,
     // テスト・デバッグ用に内部状態を覗けるようにしておく
     _getRoom: () => room,
     _isHost: () => iAmHost,
