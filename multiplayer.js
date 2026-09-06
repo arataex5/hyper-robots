@@ -26,6 +26,7 @@
   "use strict";
 
   let mp = null; // 対局の状態一式（下の resetMpState 参照）
+  let raceFlashBannerBusyUntil = 0; // #race-flash-banner が表示中の間、round-result-banner を待たせるための締切時刻
   let lastKnownHostPeerId = null; // ホスト交代時のバナー文言に「誰が切断してホストが変わったのか」を出すために覚えておく
 
   function resetMpState(cfg) {
@@ -77,6 +78,7 @@
       soloSuggestOverlayHiddenNextReady: false, // 提案ダイアログを出すために準備確認画面を一時的に隠したかどうか
       suddenDeathActive: false, // サドンデス中かどうか
       rematchVoters: new Set(), // リザルト画面で「もう一度遊ぶ」を押した人（ホスト側のみで使う集計用）
+      giveUpRevealInProgress: false, // ギブアップ時の答え合わせ（コンピュータの探索）が実行中かどうか
     };
     orderedPlayers.forEach((p) => { mp.scores[p.peerId] = 0; });
   }
@@ -152,6 +154,7 @@
       soloSuggestOverlayHiddenNextReady: false,
       suddenDeathActive: false,
       rematchVoters: new Set(),
+      giveUpRevealInProgress: false,
     };
   }
 
@@ -793,6 +796,7 @@
     setStatus("新しい目標が現れました。ロボットを動かしてゴールしたら「回答する」で宣言しましょう。");
     renderHud();
     renderRaceStatus();
+    refreshGiveUpButtonState();
   }
 
   function isGoalSatisfiedLocally() {
@@ -846,6 +850,7 @@
     if (!isNewBest) return;
     const isFirst = !mp.bestDeclare;
     mp.bestDeclare = { peerId: msg.peerId, moveCount: msg.moveCount };
+    refreshGiveUpButtonState();
     showRaceFlashBanner(isFirst, msg.peerId, msg.moveCount);
 
     if (mp.countdownKind !== "declare") {
@@ -923,6 +928,14 @@
     if (countdownEl) {
       countdownEl.classList.add("flash-hidden");
       setTimeout(() => countdownEl.classList.remove("flash-hidden"), 2200);
+    }
+    // 「初回回答／記録更新」「ギブアップしました」の表示（#race-flash-banner）
+    // が終わるまでは、次に呼ばれる可能性のある「〇〇さんが1ポイント
+    // ゲット」バナーを表示待ちにしておく。ゴールと同時に決着がつく場合
+    // （チャンピオン以外が全員ギブアップした場合など）、両方のバナーが
+    // 重なって表示されてしまうのを防ぐため。
+    if (banner.id === "race-flash-banner") {
+      raceFlashBannerBusyUntil = Date.now() + 2200;
     }
   }
 
@@ -1136,6 +1149,14 @@
   }
 
   function showRoundResultBanner(text, callback) {
+    // ゴールと同時に決着がついた場合（初回回答／記録更新／ギブアップの
+    // デカデカ表示と重なるタイミング）は、そちらの表示が終わってから
+    // このバナーを出す。
+    const now = Date.now();
+    if (now < raceFlashBannerBusyUntil) {
+      setTimeout(() => showRoundResultBanner(text, callback), raceFlashBannerBusyUntil - now);
+      return;
+    }
     const banner = document.getElementById("round-result-banner");
     const textEl = banner ? banner.querySelector(".round-result-banner-text") : null;
     if (!banner || !textEl) {
@@ -1176,17 +1197,31 @@
   function applyRoundInvalid(msg) {
     const p = mp.players.find((x) => x.peerId === msg.peerId);
     setStatus(`⚠️ ${p ? p.name : "?"} の宣言は手順を確認できませんでした。他の人はまだ宣言できます。`);
+    mp.bestDeclare = null; // ゲスト側でも「チャンピオン不在」に戻す（ホスト側は既にverifySubmission()内で行っている）
     if (msg.peerId === mp.myPeerId) {
       mp.myDeclaredMoves = null;
       refreshDeclareButtonState();
     }
     renderRaceStatus();
+    refreshGiveUpButtonState();
   }
 
   // ================= ギブアップ（答えを見る） =================
   // 誰か一人が押すだけで60秒のカウントダウンが始まる。その間に誰かが
   // 「回答する」を押せば通常の回答レースに切り替わり、誰も回答しな
   // ければ60秒後にコンピュータが答えを見せる。
+
+  // 現時点のチャンピオン（宣言中の最有力者）は「自分に降参する」ことが
+  // できないので、ギブアップボタンを非活性にしておく。チャンピオンが
+  // 変わった（＝別の人に更新された、または宣言が無効化されて誰も
+  // いなくなった）タイミングで、このボタンの状態を必ず更新し直す。
+  function refreshGiveUpButtonState() {
+    const btn = document.getElementById("btn-online-giveup");
+    if (!btn) return;
+    if (mp.matchOver) return; // 対戦終了時は finalizeMatchOverUI() 側で常に非活性にする
+    const iAmChampion = mp.bestDeclare && mp.bestDeclare.peerId === mp.myPeerId;
+    btn.disabled = !!iAmChampion || mp.myGiveUpVoted;
+  }
 
   function giveUp() {
     if (!mp.currentGoal || mp.myGiveUpVoted || mp.matchOver) return;
@@ -1300,6 +1335,13 @@
 
   function revealGiveUpAnswer() {
     if (!mp.isHost) return;
+    // 万一何らかの経路で二重に呼ばれてしまうと、それぞれが独立した
+    // IncrementalSolver を並行して動かすことになり、片方が（本来の
+    // 10秒に満たないタイミングで）先に「見つからなかった」という
+    // 結果をブロードキャストしてしまう恐れがある。念のため多重実行を
+    // 防いでおく。
+    if (mp.giveUpRevealInProgress) return;
+    mp.giveUpRevealInProgress = true;
     mp.countdownKind = null;
     setStatus("🤖 コンピュータが思考中です。しばらくお待ちください…");
     const goalColorIdx = mp.currentGoal.color === "rainbow" ? "any" : colorIndexOfColor(mp.currentGoal.color);
@@ -1311,12 +1353,14 @@
     function tick() {
       const res = solver.step(20);
       if (res.status === "found") {
+        mp.giveUpRevealInProgress = false;
         const msg = { type: "giveup-reveal", path: res.path };
         mp.net.broadcast(msg);
         applyGiveUpReveal(msg);
         return;
       }
       if (res.status === "not_found" || Date.now() > deadline) {
+        mp.giveUpRevealInProgress = false;
         const msg = { type: "giveup-reveal", path: [] };
         mp.net.broadcast(msg);
         applyGiveUpReveal(msg);
@@ -1671,6 +1715,7 @@
       } else if (!mp.bestDeclare || msg.moveCount < mp.bestDeclare.moveCount) {
         const isFirst = msg.isFirst != null ? msg.isFirst : !mp.bestDeclare;
         mp.bestDeclare = { peerId: msg.peerId, moveCount: msg.moveCount };
+        refreshGiveUpButtonState();
         showRaceFlashBanner(isFirst, msg.peerId, msg.moveCount);
         if (msg.endTime) {
           mp.countdownKind = "declare";
