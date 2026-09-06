@@ -483,15 +483,23 @@
   function onHostChanged(newHostPeerId) {
     iAmHost = newHostPeerId === myPeerId;
     if (room) {
+      const oldHostPeerId = room.hostPeerId;
       room.hostPeerId = newHostPeerId;
       // 対局が始まる前（待機画面）でホストが切り替わった場合は、
       // ここでその旨を知らせる。対局中はmultiplayer.js側のバナーで
       // 知らせるので、二重に出さないようにする。
       const gameActive = typeof window.isOnlineGameActive === "function" && window.isOnlineGameActive();
       if (room.phase !== "in-game" && !gameActive) {
-        const newHostPlayer = findPlayer(newHostPeerId);
-        const name = newHostPlayer ? newHostPlayer.name : "プレイヤー";
-        setRoomStatus(`${name}さんが新しいホストになりました。`);
+        const oldHostPlayer = findPlayer(oldHostPeerId);
+        const oldName = oldHostPlayer ? oldHostPlayer.name : "プレイヤー";
+        const whoBecameHost = iAmHost
+          ? "あなたがホストになりました"
+          : (() => {
+              const newHostPlayer = findPlayer(newHostPeerId);
+              const newName = newHostPlayer ? newHostPlayer.name : "プレイヤー";
+              return `${newName}さんがホストになりました`;
+            })();
+        setRoomStatus(`${oldName}さんが切断されました。${whoBecameHost}。`);
       }
       if (iAmHost) broadcastRoomState();
       else renderRoom();

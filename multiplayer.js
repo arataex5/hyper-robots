@@ -26,6 +26,7 @@
   "use strict";
 
   let mp = null; // 対局の状態一式（下の resetMpState 参照）
+  let lastKnownHostPeerId = null; // ホスト交代時のバナー文言に「誰が切断してホストが変わったのか」を出すために覚えておく
 
   function resetMpState(cfg) {
     const colors = cfg.colorMode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
@@ -457,7 +458,8 @@
         const nameSpan = document.createElement("span");
         nameSpan.className = "online-hud-chip-name";
         const disconnectedLabel = isPlayerConnected(p) ? "" : "［切断中］";
-        nameSpan.textContent = `${p.name || "プレイヤー"}${disconnectedLabel}: ${mp.scores[p.peerId] || 0}点`;
+        const hostLabel = p.peerId === room_hostPeerId() ? "［ホスト］" : "";
+        nameSpan.textContent = `${p.name || "プレイヤー"}${hostLabel}${disconnectedLabel}: ${mp.scores[p.peerId] || 0}点`;
         infoBox.appendChild(nameSpan);
         if (mp.giveUpVoters.has(p.peerId)) {
           const giveUpTag = document.createElement("span");
@@ -1073,7 +1075,8 @@
 
       const name = document.createElement("span");
       name.className = "next-ready-player-name";
-      name.textContent = (p.name || "プレイヤー") + (isPlayerConnected(p) ? "" : "［切断中］");
+      const hostLabel = p.peerId === room_hostPeerId() ? "［ホスト］" : "";
+      name.textContent = (p.name || "プレイヤー") + hostLabel + (isPlayerConnected(p) ? "" : "［切断中］");
       row.appendChild(name);
 
       const status = document.createElement("span");
@@ -1181,12 +1184,20 @@
     banner.classList.add("show");
   }
 
-  function showHostChangedBanner(newHostPeerId) {
+  function showHostChangedBanner(oldHostPeerId, newHostPeerId) {
     const banner = document.getElementById("disconnect-banner");
     if (!banner || !mp) return;
-    const p = mp.players.find((x) => x.peerId === newHostPeerId);
-    const name = p ? p.name || "プレイヤー" : "プレイヤー";
-    banner.innerHTML = `<div class="clear-banner-text"><span class="clear-banner-text-inner">${name}さんが<span class="clear-banner-sub">新しいホストになりました</span></span></div>`;
+    const oldP = mp.players.find((x) => x.peerId === oldHostPeerId);
+    const oldName = oldP ? oldP.name || "プレイヤー" : "プレイヤー";
+    const iAmNewHost = newHostPeerId === mp.myPeerId;
+    const whoBecameHost = iAmNewHost
+      ? "あなたがホストになりました"
+      : (() => {
+          const newP = mp.players.find((x) => x.peerId === newHostPeerId);
+          const newName = newP ? newP.name || "プレイヤー" : "プレイヤー";
+          return `${newName}さんがホストになりました`;
+        })();
+    banner.innerHTML = `<div class="clear-banner-text"><span class="clear-banner-text-inner">${oldName}さんが切断されました。<span class="clear-banner-sub">${whoBecameHost}</span></span></div>`;
     banner.classList.remove("show");
     // eslint-disable-next-line no-unused-expressions
     void banner.offsetWidth;
@@ -1309,6 +1320,7 @@
   // スナップショットをそのまま復元する」点だけ。
   window.resumeOnlineHyperRobotsGame = function (cfg, snap) {
     resetMpStateFromSnapshot(cfg, snap);
+    lastKnownHostPeerId = window.HRNet.getHostPeerId();
     window.__HR_ONLINE_ACTIVE = true;
     document.getElementById("solo-controls").classList.add("hidden");
     document.getElementById("online-controls").classList.remove("hidden");
@@ -1344,8 +1356,16 @@
       if (goalDescEl) goalDescEl.textContent = desc;
       const goalIconEl = document.getElementById("goal-icon");
       if (goalIconEl) {
-        goalIconEl.style.background = mp.currentGoal.color === "rainbow" ? "" : COLOR_INFO[mp.currentGoal.color].hex;
-        goalIconEl.className = `goal-icon shape-${mp.currentGoal.shape}${mp.currentGoal.color === "rainbow" ? " rainbow-fill" : ""}`;
+        // applyGoalReveal() と同じ組み立て方に揃える。goalIconEl 自身に
+        // 形のクラスを付けてしまうと、次に新しい目標が出た時（通常の
+        // applyGoalReveal 経由）は中の子要素だけが更新され、この枠自体の
+        // 形は古いまま残ってしまう。
+        goalIconEl.className = "goal-icon";
+        goalIconEl.style.background = "";
+        goalIconEl.innerHTML = "";
+        const icon = document.createElement("div");
+        icon.className = `target-icon shape-${mp.currentGoal.shape} tint-${mp.currentGoal.color} active`;
+        goalIconEl.appendChild(icon);
       }
     }
     updateGoalsRemaining();
@@ -1388,10 +1408,12 @@
       // 対局中にホストが切断し、別のプレイヤーへ引き継がれた場合に、
       // 誰でも見えるようにその旨を知らせる。
       if (window.__HR_ONLINE_ACTIVE && mp) {
+        const oldHostPeerId = lastKnownHostPeerId;
         mp.isHost = window.HRNet.isHost();
-        showHostChangedBanner(newHostPeerId);
+        showHostChangedBanner(oldHostPeerId, newHostPeerId);
         renderHud();
       }
+      lastKnownHostPeerId = newHostPeerId;
     });
     window.HRNet.on("peer-list-changed", () => {
       // 対局中に誰かが切断／復帰した時、HUDと（表示中なら）準備確認の
@@ -1407,6 +1429,7 @@
 
   window.startOnlineHyperRobotsGame = function (cfg) {
     resetMpState(cfg);
+    lastKnownHostPeerId = window.HRNet.getHostPeerId();
     window.__HR_ONLINE_ACTIVE = true;
     document.getElementById("solo-controls").classList.add("hidden");
     document.getElementById("online-controls").classList.remove("hidden");

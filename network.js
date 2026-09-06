@@ -203,7 +203,17 @@
         const now = Date.now();
         peers.forEach((p, peerId) => {
           if (!p.connected) return;
-          if (p.conn && p.conn.open) {
+          // 直接のDataConnectionを一度も確立したことがない相手（"welcome"や
+          // "peer-joined"経由で存在だけ知っている、メッシュ完成待ちの相手）
+          // には、そもそもpingを送りようがなく、生存確認もできない。この
+          // 場合にタイムアウト判定をかけると、実際にはまだ生きている相手を
+          // 誤って「切断」と判定してしまう。
+          // 一方、一度でも接続があった相手は、その conn.open が今どうかに
+          // 関わらずタイムアウト判定の対象にする — WebRTCの close/error
+          // イベントに頼らず能動的に切断を検知する、というこの仕組み自体の
+          // 目的上、"conn.open が既にfalse" は判定を止める理由にはならない。
+          if (!p.conn) return;
+          if (p.conn.open) {
             try { p.conn.send(JSON.stringify({ type: "ping" })); } catch (e) { /* noop */ }
           }
           const last = p.lastSeen || 0;
@@ -245,7 +255,7 @@
           if (!peers.has(p.peerId)) {
             peers.set(p.peerId, { ...p, conn: null, lastSeen: Date.now() });
           } else {
-            Object.assign(peers.get(p.peerId), p);
+            Object.assign(peers.get(p.peerId), p, { lastSeen: Date.now() });
           }
         });
         // 自分より参加順が古い相手には自分から接続しにいく
@@ -260,7 +270,7 @@
         const p = msg.peer;
         if (p.peerId === myPeerId) return;
         if (!peers.has(p.peerId)) peers.set(p.peerId, { ...p, conn: null, lastSeen: Date.now() });
-        else Object.assign(peers.get(p.peerId), p);
+        else Object.assign(peers.get(p.peerId), p, { lastSeen: Date.now() });
         if (shouldInitiateConnection(myJoinOrder, p.joinOrder)) {
           connectTo(p.peerId);
         }
@@ -372,12 +382,6 @@
     }
 
     function wireConnection(conn, remoteJoinOrder, remoteProfile, remoteToken) {
-      // 明示的に渡されなかった場合は、接続時の metadata から補う
-      // （メッシュ内で自分から他メンバーへ接続しに行く側は、相手の
-      // joinOrder/profile/tokenをこの時点でまだ知らないことが多いが、
-      // metadata経由で相手側が自分の情報を教えてくれている）。
-      if (remoteToken === undefined && conn.metadata) remoteToken = conn.metadata.token || null;
-      if (remoteProfile === undefined && conn.metadata) remoteProfile = conn.metadata.profile || null;
       // 同じトークンを持つ既存エントリ（切断中のはず）があれば、それを
       // 新しい peerId に「引き継ぐ」形にする。古いキーのエントリをここで
       // 消しておかないと、再接続のたびにpeers Mapが増え続けてしまう。
@@ -451,7 +455,15 @@
       // 時に「自分」を再接続として認識してもらえない
       // （tokenがnullのまま登録されてしまうため）。
       const conn = peer.connect(remotePeerId, { reliable: true, metadata: { profile: myProfileForHost, token: myToken } });
-      wireConnection(conn);
+      // 自分から接続しに行く側では、conn.metadata は「自分自身」を
+      // 説明するものであり、相手の情報ではない。もしここで
+      // wireConnection(conn) だけを呼んでconn.metadataへのフォール
+      // バックに頼ると、相手のtoken/profileとして自分の値を誤って
+      // 書き込んでしまう（自分のtokenがhostPeerId等と偶然一致した
+      // 場合に、既存の別エントリを誤って消してしまう等の実害がある）。
+      // 相手の情報は、既に分かっていれば（"peer-joined"や"welcome"
+      // 経由で）existing に入っているので、それを明示的に渡す。
+      wireConnection(conn, existing ? existing.joinOrder : undefined, existing ? existing.profile : undefined, existing ? existing.token : undefined);
     }
 
     function createPeerWithRetry(desiredId, attemptsLeft) {
@@ -516,9 +528,12 @@
 
       // メッシュ構成のため、自分より参加順が新しい他メンバーからの直接
       // 接続も受け付けられるようにしておく（ホスト宛の特別な処理は不要で、
-      // 単に配線するだけでよい）。
+      // 単に配線するだけでよい）。ここは相手からの着信なので、
+      // conn.metadata は相手自身の情報として正しく使える。
       peer.on("connection", (conn) => {
-        wireConnection(conn);
+        const remoteToken = (conn.metadata && conn.metadata.token) || null;
+        const remoteProfile = (conn.metadata && conn.metadata.profile) || null;
+        wireConnection(conn, undefined, remoteProfile, remoteToken);
       });
 
       return new Promise((resolve, reject) => {
@@ -529,6 +544,9 @@
         // ここで別に conn.on("data", ...) を重ねて登録しない
         // （二重登録すると同じメッセージが2回処理されてしまう）。
         // 「welcome」を受け取れたかどうかは emitter の room-joined イベントで見る。
+        // ここは自分から接続しに行く側なので、conn.metadata は「自分自身」
+        // の情報であり、相手（ホスト）の情報ではない。相手のtoken等は
+        // "welcome" メッセージで別途受け取るので、ここでは渡さない。
         wireConnection(conn);
         let settled = false;
         conn.on("open", () => {
