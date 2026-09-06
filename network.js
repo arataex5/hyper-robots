@@ -311,7 +311,7 @@
         // 新規参加者に、既存ピア一覧（自分含む）を送る
         const list = peerListArray()
           .filter((x) => x.peerId !== conn.peer)
-          .concat([{ peerId: myPeerId, profile: myProfileForHost, joinOrder: myJoinOrder, connected: true, isCpu: false }]);
+          .concat([{ peerId: myPeerId, profile: myProfileForHost, joinOrder: myJoinOrder, connected: true, isCpu: false, token: myToken }]);
         conn.send(
           JSON.stringify({
             type: "welcome",
@@ -321,8 +321,11 @@
             yourToken: assignedToken,
           })
         );
-        // 既存メンバーに新規参加を告知（各自が必要なら接続しにいく）
-        broadcast({ type: "peer-joined", peer: { peerId: conn.peer, profile: presentedProfile, joinOrder, connected: true } }, conn.peer);
+        // 既存メンバーに新規参加を告知（各自が必要なら接続しにいく）。
+        // token も一緒に伝えないと、ホスト以外のメンバーはこの相手が
+        // 誰の再接続なのか判断できず、再接続のたびに「別人」として
+        // 二重に表示されてしまう。
+        broadcast({ type: "peer-joined", peer: { peerId: conn.peer, profile: presentedProfile, joinOrder, connected: true, token: assignedToken } }, conn.peer);
         emitter.emit("peer-list-changed", peerListArray());
       });
     }
@@ -475,6 +478,13 @@
       hostPeerId = myPeerId;
       myJoinOrder = 0;
       myProfileForHost = myProfile;
+      // ホスト自身にもトークンを発行し、localStorageに保存しておく。
+      // これをしないと、自分がホストであることを示すトークンが
+      // 一切存在せず、後で自分がホストの座を失って再接続する時
+      // （ホスト権を他の人に譲った後、自分が戻ってくる場合）に、
+      // 「初めて参加する別人」として扱われてしまう。
+      myToken = generateToken();
+      storeToken(roomId, myToken);
 
       peer.on("connection", (conn) => handleIncomingHostConnection(conn));
 
@@ -619,6 +629,7 @@
       getHostPeerId: () => hostPeerId,
       getPeerList: peerListArray,
       getMyJoinOrder: () => myJoinOrder,
+      getMyToken: () => myToken,
     };
   }
 

@@ -67,7 +67,11 @@
       <div class="title-screen-panel hidden" id="screen-room">
         <button type="button" class="btn back-btn" id="btn-room-leave">← 退出</button>
         <h2 class="room-name" id="room-name-display"></h2>
-        <div class="room-id-display">ルームID：<span id="room-id-display"></span></div>
+        <div class="room-id-display">
+          ルームID：<span id="room-id-display"></span>
+          <button type="button" class="btn-copy-room-id" id="btn-copy-room-id" title="ルームIDをコピー" aria-label="ルームIDをコピー">📋</button>
+        </div>
+        <span class="room-id-copied-toast" id="room-id-copied-toast">コピーしました</span>
 
         <div class="room-settings" id="room-settings-panel">
           <div class="room-setting-row">

@@ -132,6 +132,58 @@
       });
     }
 
+    const copyRoomIdBtn = document.getElementById("btn-copy-room-id");
+    if (copyRoomIdBtn) {
+      let copyToastTimer = null;
+      copyRoomIdBtn.addEventListener("click", async () => {
+        const idEl = document.getElementById("room-id-display");
+        const roomId = idEl ? idEl.textContent : "";
+        if (!roomId) return;
+        let copied = false;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(roomId);
+            copied = true;
+          }
+        } catch (e) {
+          copied = false;
+        }
+        if (!copied) {
+          // クリップボードAPIが使えない環境向けのフォールバック
+          try {
+            const textarea = document.createElement("textarea");
+            textarea.value = roomId;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            copied = document.execCommand("copy");
+            document.body.removeChild(textarea);
+          } catch (e) {
+            copied = false;
+          }
+        }
+        const toast = document.getElementById("room-id-copied-toast");
+        if (toast && copied) {
+          toast.textContent = "コピーしました";
+          toast.classList.remove("show");
+          // eslint-disable-next-line no-unused-expressions
+          void toast.offsetWidth;
+          toast.classList.add("show");
+          if (copyToastTimer) clearTimeout(copyToastTimer);
+          copyToastTimer = setTimeout(() => toast.classList.remove("show"), 1600);
+        } else if (toast && !copied) {
+          toast.textContent = "コピーできませんでした";
+          toast.classList.remove("show");
+          void toast.offsetWidth;
+          toast.classList.add("show");
+          if (copyToastTimer) clearTimeout(copyToastTimer);
+          copyToastTimer = setTimeout(() => toast.classList.remove("show"), 1600);
+        }
+      });
+    }
+
     const joinBtn = document.getElementById("btn-join-room");
     const joinInput = document.getElementById("join-room-id-input");
     if (joinInput) {

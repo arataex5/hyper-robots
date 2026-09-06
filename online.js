@@ -71,6 +71,7 @@
           ready: false,
           connected: true,
           isCpu: false,
+          token: window.HRNet.getMyToken(),
         },
       ],
       phase: "lobby",
@@ -209,12 +210,25 @@
       }
     } else if (msg.type === "resume-game") {
       resumeOnlineGame(msg);
+    } else if (msg.type === "player-remapped") {
+      if (typeof window.remapOnlinePlayerId === "function") {
+        window.remapOnlinePlayerId(msg.oldPeerId, msg.newPeerId);
+      }
     } else if (msg.type === "ready-toggle" && iAmHost) {
       const p = findPlayer(msg.peerId);
       if (p) p.ready = !p.ready;
       broadcastRoomState();
     } else if (msg.type === "leave-room" && iAmHost) {
-      room.players = room.players.filter((p) => p.peerId !== msg.peerId);
+      // 対局中の場合は完全に削除せず「切断」扱いにしておく。こうしないと
+      // トークンが紐づくエントリごと消えてしまい、後で同じ相手が
+      // 戻ってきた時に再接続と認識できず、別人として扱われてしまう。
+      // まだロビー段階（対局が始まっていない）なら、素直に一覧から外す。
+      if (room.phase === "in-game") {
+        const p = findPlayer(msg.peerId);
+        if (p) p.connected = false;
+      } else {
+        room.players = room.players.filter((p) => p.peerId !== msg.peerId);
+      }
       broadcastRoomState();
     } else if (msg.type === "start-game") {
       beginOnlineGame(msg);
@@ -405,6 +419,9 @@
             const oldPeerId = ghost.peerId;
             room.players = room.players.filter((pl) => pl !== ghost);
             mergeGhostInto(p, oldPeerId);
+            if (iAmHost) {
+              window.HRNet.broadcastApp({ type: "player-remapped", oldPeerId, newPeerId: p.peerId });
+            }
           }
         }
         // 切断・復帰しても特別なモード切り替えは行わない。無操作のまま
@@ -427,6 +444,17 @@
           }
           room.players.sort((a, b) => a.joinOrder - b.joinOrder);
           mergeGhostInto(ghost, oldPeerId);
+          // ホストは、この付け替え（旧peerId→新peerId）を全員に明示的に
+          // 知らせる。room-state のブロードキャストは room オブジェクトを
+          // まるごと上書きするだけで、それを受け取った側の
+          // multiplayer.js（mp.players・mp.scores等）までは連動して
+          // 書き換えてくれない。そのため、自分では再接続を検知できな
+          // かった（room-stateで結果だけを受け取った）他のプレイヤーの
+          // 画面では、対局中の得点や接続状態がいつまでも古いpeerIdの
+          // ままになってしまう。
+          if (iAmHost) {
+            window.HRNet.broadcastApp({ type: "player-remapped", oldPeerId, newPeerId: netP.peerId });
+          }
           // 対局中にホストがこの再接続を検知した場合、ロビーへは通さず
           // 今の対局のスナップショットをこの相手にだけ直接送る。
           if (iAmHost && room.phase === "in-game" && typeof window.isOnlineGameActive === "function" && window.isOnlineGameActive()) {
