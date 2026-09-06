@@ -60,6 +60,16 @@
   let solverStartSnapshot = null;
   let checkPollTimer = null;
   let thinkingShowTimer = null;
+  // 新しい目標に切り替わるたびに増やすカウンタ。scheduleSolverTick()の
+  // setTimeoutは0msでも実際にはイベントループの都合で遅延することがあり、
+  // 「前の目標の、まだ実行されていなかった探索ステップ」が、次の目標が
+  // 始まった後になって実行されてしまうことがある。solverStatusだけを
+  // 見て判定すると、次の目標も「searching」中であれば古いステップが
+  // そのまま素通りしてしまい、同じsolverを二重に進めてしまう
+  // （内部状態が壊れ、本来解けるはずの問題まで「見つからない」と
+  // 誤判定される原因になっていた）。このカウンタで「今の目標の
+  // ステップかどうか」を確実に区別する。
+  let solverGeneration = 0;
 
   // ---------- helpers ----------
   function cloneRobots(list) {
@@ -481,19 +491,24 @@
 
   // ---------- background solver ----------
   function startSolverForGoal(goal) {
+    solverGeneration++;
     solverStartSnapshot = cloneRobots(robots);
     const idx = goal.color === "rainbow" ? "any" : colorIndexOf(goal.color);
     solver = new IncrementalSolver(board, solverStartSnapshot, idx, goal.r, goal.c, ACTIVE_COLORS);
     solverStatus = "searching";
     solverPath = null;
     solverDeadline = Date.now() + SOLVER_TIME_BUDGET_MS;
-    scheduleSolverTick();
+    scheduleSolverTick(solverGeneration);
   }
 
-  function scheduleSolverTick() {
+  function scheduleSolverTick(gen) {
     setTimeout(() => {
+      // 自分が発行された時点の世代と、今の世代が食い違っていれば、
+      // すでに乗り換えられた古い探索の生き残りステップなので即座に破棄する。
+      if (gen !== solverGeneration) return;
       if (solverStatus !== "searching") return;
       const res = solver.step(15);
+      if (gen !== solverGeneration) return; // step()実行中に切り替わっていた場合の保険
       if (res.status === "found") {
         solverStatus = "found";
         solverPath = res.path;
@@ -503,7 +518,7 @@
         solverStatus = "not_found";
         return;
       }
-      scheduleSolverTick();
+      scheduleSolverTick(gen);
     }, 0);
   }
 
@@ -597,7 +612,7 @@
       thinkingShowTimer = null;
       if (solverStatus === "searching") showThinkingOverlay();
     }, 450);
-    scheduleSolverTick();
+    scheduleSolverTick(solverGeneration);
     pollSolverUntilSettled();
   }
 
@@ -878,7 +893,7 @@
   // タイトル画面（title.js）の「ゲームをはじめる」ボタンから呼び出される。
   // mode: "four"（デフォルト）または "five"（黒ロボットを追加）
   // useDiagonals: true の場合、斜め壁（任意設定）を有効にする
-  window.startHyperRobotsGame = function (mode, useDiagonals) {
+  window.startHyperRobotsGame = function (mode, useDiagonals, presetState) {
     // オンライン対戦から遷移してきた場合に備えて、オンライン専用の
     // 画面状態・進行中のタイマーなどを確実にリセットしておく
     window.__HR_ONLINE_ACTIVE = false;
@@ -895,6 +910,8 @@
     if (playModeBadge) playModeBadge.textContent = "一人用モード";
     const roomIdBadge = document.getElementById("room-id-badge");
     if (roomIdBadge) roomIdBadge.classList.add("hidden");
+    const playerBadge = document.getElementById("player-badge");
+    if (playerBadge) playerBadge.classList.add("hidden");
 
     ACTIVE_COLORS = mode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
     USE_DIAGONALS = !!useDiagonals;
@@ -906,8 +923,45 @@
     if (diagonalBadge) {
       diagonalBadge.style.display = USE_DIAGONALS ? "" : "none";
     }
-    newMap();
+    if (presetState) {
+      startWithPresetState(presetState);
+    } else {
+      newMap();
+    }
   };
+
+  // オンライン対戦で残り一人になった際、「ソロモードに切り替える」で
+  // 遷移してきた場合に使う。既存の盤面・ロボット配置・残り目標数を
+  // そのまま引き継いで、乱数で新しい盤面を作り直さずにソロモードへ移る。
+  function startWithPresetState(presetState) {
+    if (checkPollTimer) { clearInterval(checkPollTimer); checkPollTimer = null; }
+    if (thinkingShowTimer) { clearTimeout(thinkingShowTimer); thinkingShowTimer = null; }
+    hideThinkingOverlay();
+    hideSolverFailedModal();
+    solverStatus = "idle";
+    locked = false;
+    selectedRobot = null;
+    btnNext.disabled = false;
+
+    board = presetState.board;
+    robots = cloneRobots(presetState.robots);
+    const remainingCount = Math.max(1, presetState.remainingGoalsCount || 1);
+    const otherTargets = shuffleArrayLocal(
+      board.targets.filter(
+        (t) => !(presetState.currentGoal && t.r === presetState.currentGoal.r && t.c === presetState.currentGoal.c && t.color === presetState.currentGoal.color && t.shape === presetState.currentGoal.shape)
+      )
+    );
+    targetQueue = presetState.currentGoal
+      ? [presetState.currentGoal, ...otherTargets].slice(0, remainingCount)
+      : otherTargets.slice(0, remainingCount);
+    totalGoals = targetQueue.length;
+    gameOver = false;
+    goalIndex = -1;
+
+    renderBoardStatic();
+    renderRobots();
+    nextGoal();
+  }
 
   // テスト用に内部状態を覗ける・強制的に「思考中」状態にできるようにしておく
   window._HRSoloDebug = {
@@ -925,5 +979,6 @@
     getRobots: () => robots,
     getSolver: () => solver,
     restartSolverForGoal: (g) => { startSolverForGoal(g); },
+    forceNotFound: () => { solverStatus = "not_found"; if (checkPollTimer) { clearInterval(checkPollTimer); checkPollTimer = null; } },
   };
 })();

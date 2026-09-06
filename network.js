@@ -222,6 +222,39 @@
           }
         });
       }, HEARTBEAT_INTERVAL_MS);
+      startVisibilityGuard();
+    }
+
+    // スマホ等でタブがスリープ／バックグラウンドになると、JSのタイマー
+    // 自体がまるごと止まる（setIntervalが呼ばれなくなる）。この間、
+    // 相手からのpingを受け取れず lastSeen がどんどん古くなっていくが、
+    // これは「相手が切断した」のではなく「自分がスリープしていた」だけ
+    // であることが多い。それにもかかわらず、画面が復帰した直後に通常の
+    // ハートビートが一回走ると、蓄積した経過時間だけでいきなり
+    // タイムアウト超過と判定してしまい、実際にはまだ生きている相手を
+        // 「切断」と誤判定してホストの座を勝手に奪ってしまう
+    // （＝お互いが自分をホストだと思い込む「分裂」状態の原因）。
+    // そこで、画面が再び見えるようになった瞬間には、蓄積した経過時間を
+    // 一旦リセットして相手に猶予を与え、その場で改めてpingを送って
+    // 生死を確認し直す。これにより、本当に切断していた場合は次の
+    // タイムアウト判定で正しく検知され、単に自分がスリープしていた
+    // だけの場合は不必要な「切断」判定を避けられる。
+    let visibilityGuardWired = false;
+    function startVisibilityGuard() {
+      if (visibilityGuardWired) return;
+      if (typeof document === "undefined" || typeof document.addEventListener !== "function") return;
+      visibilityGuardWired = true;
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState !== "visible") return;
+        const now = Date.now();
+        peers.forEach((p) => {
+          if (!p.connected || !p.conn) return;
+          p.lastSeen = now; // 猶予を与える（すぐにはタイムアウト判定しない）
+          if (p.conn.open) {
+            try { p.conn.send(JSON.stringify({ type: "ping" })); } catch (e) { /* noop */ }
+          }
+        });
+      });
     }
     function stopHeartbeat() {
       if (heartbeatTimer) {
@@ -709,6 +742,10 @@
       getPeerList: peerListArray,
       getMyJoinOrder: () => myJoinOrder,
       getMyToken: () => myToken,
+      // テスト用: 特定の相手の lastSeen を直接いじれるようにしておく
+      // （スリープ中に時間だけが経過した状況を、実際に待たずに再現するため）。
+      _debugSetLastSeen: (peerId, ts) => { const p = peers.get(peerId); if (p) p.lastSeen = ts; },
+      _debugGetLastSeen: (peerId) => { const p = peers.get(peerId); return p ? p.lastSeen : null; },
     };
   }
 

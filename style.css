@@ -1184,6 +1184,7 @@ body.title-active { overflow: hidden; }
   border-radius: 999px;
   background: var(--panel-2);
 }
+.player-badge.hidden { display: none; }
 #player-badge-avatar {
   width: 30px;
   height: 30px;
@@ -1753,3 +1754,89 @@ body.title-active { overflow: hidden; }
 }
 
 .controls.hidden { display: none; }
+
+/* 勝敗判定までの残り時間の大表示（画面中央上側、半透明の赤文字） */
+.big-countdown-display {
+  position: fixed;
+  top: 10vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 916;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 800;
+  font-size: clamp(2.2rem, 10vw, 4.5rem);
+  color: rgba(226, 84, 63, 0.55);
+  text-shadow: 0 4px 20px rgba(0,0,0,0.35);
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  opacity: 1;
+}
+.big-countdown-display.hidden { display: none; }
+.big-countdown-display.flash-hidden { opacity: 0; }
+
+/* 初回回答・記録更新時のデカデカ表示（切断バナーと同じ仕組みを流用） */
+.race-flash-banner {
+  position: fixed;
+  inset: 0;
+  z-index: 921;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+}
+.race-flash-banner.show {
+  animation: clearBannerPop 2.2s cubic-bezier(.2,.9,.3,1) forwards;
+}
+.race-flash-banner-text {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.5rem, 6.5vw, 2.8rem);
+  text-align: center;
+  line-height: 1.5;
+  color: #fff;
+  padding: 0.6em 0.9em;
+  max-width: 90vw;
+  text-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 40px rgba(226,84,63,0.6);
+  background: rgba(16,20,34,0.72);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
+}
+
+.solo-suggest-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 919;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 18, 0.6);
+}
+.solo-suggest-overlay.hidden { display: none; }
+.solo-suggest-box {
+  width: min(92vw, 420px);
+  padding: 26px 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 30px 70px -25px rgba(0,0,0,0.7);
+  text-align: center;
+}
+.solo-suggest-message {
+  margin: 0 0 22px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.5;
+}
+.solo-suggest-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.solo-suggest-actions .btn {
+  width: 100%;
+}

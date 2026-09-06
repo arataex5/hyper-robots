@@ -22,6 +22,7 @@
     answerTimeLimit: 60,
     playUntilEnd: true,
     nextReadyTimeout: 30, // 秒数 | "unlimited"（時間制限なし） | "off"（準備確認自体をしない）
+    showBigCountdown: true, // 勝敗判定までの残り時間を、画面中央上側にデカデカと表示するかどうか
   };
 
   let room = null; // { roomId, roomName, hostPeerId, settings, players: [...], phase }
@@ -141,6 +142,13 @@
     if (nextReadyGroup) {
       const val = String(room.settings.nextReadyTimeout);
       Array.from(nextReadyGroup.children).forEach((btn) => {
+        btn.classList.toggle("selected", btn.dataset.value === val);
+      });
+    }
+    const bigCountdownGroup = el("room-setting-bigcountdown");
+    if (bigCountdownGroup) {
+      const val = room.settings.showBigCountdown ? "on" : "off";
+      Array.from(bigCountdownGroup.children).forEach((btn) => {
         btn.classList.toggle("selected", btn.dataset.value === val);
       });
     }
@@ -618,6 +626,7 @@
       ["room-setting-timelimit", "answerTimeLimit", (v) => Number(v)],
       ["room-setting-playuntilend", "playUntilEnd", (v) => v === "on"],
       ["room-setting-nextready", "nextReadyTimeout", (v) => (v === "unlimited" || v === "off" ? v : Number(v))],
+      ["room-setting-bigcountdown", "showBigCountdown", (v) => v === "on"],
     ].forEach(([groupId, key, transform]) => {
       const group = el(groupId);
       if (!group) return;

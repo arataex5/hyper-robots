@@ -72,6 +72,9 @@
       readyForNext: new Set(), // ホスト側のみで使う集計用（次の問題へ進む準備）
       myReadyForNext: false,
       locked: false,
+      aloneTimer: null, // 自分一人になってからソロモード提案までの15秒待ちタイマー
+      aloneHandled: false, // 今回の「一人になった期間」について、既に提案済み（待機する/切替済み）かどうか
+      soloSuggestOverlayHiddenNextReady: false, // 提案ダイアログを出すために準備確認画面を一時的に隠したかどうか
     };
     orderedPlayers.forEach((p) => { mp.scores[p.peerId] = 0; });
   }
@@ -142,6 +145,9 @@
       readyForNext: new Set(),
       myReadyForNext: false,
       locked: false,
+      aloneTimer: null,
+      aloneHandled: false,
+      soloSuggestOverlayHiddenNextReady: false,
     };
   }
 
@@ -675,7 +681,9 @@
     if (!mp.isHost) return;
     const isNewBest = !mp.bestDeclare || msg.moveCount < mp.bestDeclare.moveCount;
     if (!isNewBest) return;
+    const isFirst = !mp.bestDeclare;
     mp.bestDeclare = { peerId: msg.peerId, moveCount: msg.moveCount };
+    showRaceFlashBanner(isFirst, msg.peerId, msg.moveCount);
 
     if (mp.countdownKind !== "declare") {
       // ギブアップ待ちだった場合はここで打ち切り、通常カウントダウンに切り替える
@@ -687,6 +695,7 @@
         peerId: msg.peerId,
         moveCount: msg.moveCount,
         endTime: mp.countdownEndTime,
+        isFirst,
       };
       mp.net.broadcast(payload);
       if (wasGiveUp) {
@@ -699,7 +708,42 @@
       maybeResolveIfAllOthersAlreadyConceded();
     } else {
       renderRaceStatus();
-      mp.net.broadcast({ type: "declare-update", peerId: msg.peerId, moveCount: msg.moveCount });
+      mp.net.broadcast({ type: "declare-update", peerId: msg.peerId, moveCount: msg.moveCount, isFirst });
+    }
+  }
+
+  // 初回回答・記録更新を、画面全体にデカデカと一瞬表示する。
+  // 表示中は、勝敗判定までの大きな残り時間表示を一時的に透明にする
+  // （文字が重なって読みにくくなるのを避けるため）。
+  function showRaceFlashBanner(isFirst, peerId, moveCount) {
+    const banner = document.getElementById("race-flash-banner");
+    const countdownEl = document.getElementById("big-countdown-display");
+    if (!banner) return;
+    const isSelf = peerId === mp.myPeerId;
+    const p = mp.players.find((x) => x.peerId === peerId);
+    const name = p ? p.name || "プレイヤー" : "プレイヤー";
+    let text;
+    if (isFirst) {
+      const nameForFirst = isSelf ? "" : `${name}さんが`;
+      text = `${nameForFirst}${moveCount}手でゴール！<br>勝敗判定まで${mp.settings.answerTimeLimit}秒`;
+    } else {
+      const nameForUpdate = isSelf ? "" : `${name}さんが`;
+      text = `${nameForUpdate}${moveCount}手で記録更新！`;
+    }
+    const textEl = banner.querySelector(".race-flash-banner-text") || (() => {
+      const el = document.createElement("div");
+      el.className = "race-flash-banner-text";
+      banner.appendChild(el);
+      return el;
+    })();
+    textEl.innerHTML = text;
+    banner.classList.remove("show");
+    // eslint-disable-next-line no-unused-expressions
+    void banner.offsetWidth;
+    banner.classList.add("show");
+    if (countdownEl) {
+      countdownEl.classList.add("flash-hidden");
+      setTimeout(() => countdownEl.classList.remove("flash-hidden"), 2200);
     }
   }
 
@@ -711,6 +755,24 @@
     } else {
       renderRaceStatus();
     }
+    renderBigCountdown();
+  }
+
+  // 勝敗判定（回答の宣言・ギブアップ）までの残り時間を、画面中央上側に
+  // デカデカと半透明の赤文字で表示する（設定でオフにできる）。
+  function renderBigCountdown() {
+    const el = document.getElementById("big-countdown-display");
+    if (!el) return;
+    const shouldShow =
+      mp.settings.showBigCountdown &&
+      (mp.countdownKind === "declare" || mp.countdownKind === "giveup") &&
+      mp.countdownRemaining > 0;
+    if (!shouldShow) {
+      el.classList.add("hidden");
+      return;
+    }
+    el.classList.remove("hidden");
+    el.textContent = String(mp.countdownRemaining);
   }
 
   // 「あと何秒か」は毎回 countdownEndTime（絶対時刻）とのdiffから
@@ -1068,10 +1130,19 @@
       // 残したまま次のお題に進んでしまわないようにする）。
       mp.robots = mp.roundStartSnapshot.map((p) => ({ ...p }));
       mp.robots.forEach((p, i) => setPercentPos(mp.robotEls[i], p.r, p.c));
+      // コンピュータも見つけられなかった手順は記録しない
+      // （＝リプレイボタンを出さない）。
+      mp.lastChampionRoute = null;
       setStatus("😢 コンピュータもゴールできませんでした！");
       showRoundResultBanner("コンピュータもゴールできませんでした！引き分け！", awaitNextRoundReady);
       return;
     }
+    // コンピュータが見つけた手順も、後で「最短手のリプレイ」として
+    // 見られるように記録しておく。
+    mp.lastChampionRoute = {
+      moves: path.map((s) => ({ ...s })),
+      startSnapshot: mp.roundStartSnapshot.map((p) => ({ ...p })),
+    };
     setStatus(`🤖 コンピュータの最短手順は ${path.length}手 でした。`);
     mp.robots = mp.roundStartSnapshot.map((p) => ({ ...p }));
     mp.robots.forEach((p, i) => setPercentPos(mp.robotEls[i], p.r, p.c));
@@ -1097,6 +1168,89 @@
     if (p.peerId === mp.myPeerId) return true;
     const netP = window.HRNet.getPeerList().find((x) => x.peerId === p.peerId);
     return netP ? netP.connected : false;
+  }
+
+  // ================= 残り一人になった時のソロモード提案 =================
+
+  function isHostAlone() {
+    if (!mp.isHost) return false;
+    const others = mp.players.filter((p) => p.peerId !== mp.myPeerId);
+    return others.length > 0 && others.every((p) => !isPlayerConnected(p));
+  }
+
+  function checkAloneStatus() {
+    if (!mp.isHost) return;
+    const alone = isHostAlone();
+    if (alone) {
+      if (mp.aloneTimer || mp.aloneHandled) return; // 既にタイマー中、または既に提案済み
+      mp.aloneTimer = setTimeout(() => {
+        mp.aloneTimer = null;
+        if (!isHostAlone()) return; // タイマーの間に誰かが戻ってきていた
+        showSoloSuggestOverlay();
+      }, 15000);
+    } else {
+      // 誰かが戻ってきた：待機中のタイマー・表示中の提案・常設の切替ボタンを片付ける
+      if (mp.aloneTimer) { clearTimeout(mp.aloneTimer); mp.aloneTimer = null; }
+      mp.aloneHandled = false;
+      const overlay = document.getElementById("solo-suggest-overlay");
+      if (overlay) overlay.classList.add("hidden");
+      const switchBtn = document.getElementById("btn-switch-to-solo");
+      if (switchBtn) switchBtn.classList.add("hidden");
+    }
+  }
+
+  function showSoloSuggestOverlay() {
+    if (!isHostAlone()) return;
+    mp.aloneHandled = true;
+    // 準備確認画面が出ていた場合は、提案ダイアログの邪魔になるので
+    // 一旦隠しておく。「待機する」を選んだ時だけ再表示する。
+    const readyOverlay = document.getElementById("next-ready-overlay");
+    if (readyOverlay && !readyOverlay.classList.contains("hidden")) {
+      readyOverlay.classList.add("hidden");
+      mp.soloSuggestOverlayHiddenNextReady = true;
+    } else {
+      mp.soloSuggestOverlayHiddenNextReady = false;
+    }
+    const overlay = document.getElementById("solo-suggest-overlay");
+    if (overlay) overlay.classList.remove("hidden");
+  }
+
+  function onSoloSuggestWait() {
+    const overlay = document.getElementById("solo-suggest-overlay");
+    if (overlay) overlay.classList.add("hidden");
+    if (mp.soloSuggestOverlayHiddenNextReady) {
+      const readyOverlay = document.getElementById("next-ready-overlay");
+      if (readyOverlay) readyOverlay.classList.remove("hidden");
+      mp.soloSuggestOverlayHiddenNextReady = false;
+    }
+    // ホストが一人のままである限りだけ表示する常設の切替ボタン
+    const switchBtn = document.getElementById("btn-switch-to-solo");
+    if (switchBtn) switchBtn.classList.toggle("hidden", !isHostAlone());
+  }
+
+  function onSoloSuggestSwitch() {
+    const overlay = document.getElementById("solo-suggest-overlay");
+    if (overlay) overlay.classList.add("hidden");
+    switchToSoloMode();
+  }
+
+  // 現在の問題が始まった時点の配置に戻し、盤面・ロボット配置・残り目標数を
+  // 一時的に保存したうえで、その情報をもとにソロモード画面を開く。
+  function switchToSoloMode() {
+    if (mp.aloneTimer) { clearTimeout(mp.aloneTimer); mp.aloneTimer = null; }
+    const remainingGoalsCount = Math.max(1, mp.totalRounds - mp.goalIndex);
+    const presetState = {
+      board: mp.board,
+      robots: mp.roundStartSnapshot ? mp.roundStartSnapshot.map((p) => ({ ...p })) : mp.robots.map((p) => ({ ...p })),
+      currentGoal: mp.currentGoal ? { ...mp.currentGoal } : null,
+      remainingGoalsCount,
+    };
+    const colorMode = mp.colors && mp.colors.length >= 5 ? "five" : "four";
+    const useDiagonals = !!(mp.settings && mp.settings.diagonals);
+    if (typeof window.HROnline === "object" && typeof window.HROnline.leaveRoom === "function") {
+      window.HROnline.leaveRoom();
+    }
+    window.startHyperRobotsGame(colorMode, useDiagonals, presetState);
   }
 
   function renderNextReadyPlayerList() {
@@ -1190,10 +1344,14 @@
   // ロボット状態に戻し、操作を再開できるようにする。
   function watchChampionReplay() {
     if (!mp.lastChampionRoute) return;
-    const veil = document.getElementById("next-ready-replay-veil");
+    // 再生中は準備確認画面自体が盤面を隠してしまい見えないので、
+    // 半透明にするだけでなく、画面ごと一時的に非表示にする。
+    // 終わったら再表示する。
+    const overlay = document.getElementById("next-ready-overlay");
+    const wasHidden = overlay ? overlay.classList.contains("hidden") : true;
+    if (overlay) overlay.classList.add("hidden");
     const replayBtn = document.getElementById("btn-watch-champion-replay");
     const readyBtn = document.getElementById("btn-online-next-ready");
-    if (veil) veil.classList.remove("hidden");
     if (replayBtn) replayBtn.disabled = true;
     if (readyBtn) readyBtn.disabled = true;
 
@@ -1207,7 +1365,7 @@
       if (i >= route.moves.length) {
         mp.robots = positionToRestore.map((p) => ({ ...p }));
         mp.robots.forEach((p, idx) => setPercentPos(mp.robotEls[idx], p.r, p.c));
-        if (veil) veil.classList.add("hidden");
+        if (overlay && !wasHidden) overlay.classList.remove("hidden");
         if (replayBtn) replayBtn.disabled = false;
         if (readyBtn) readyBtn.disabled = mp.myReadyForNext;
         return;
@@ -1297,7 +1455,9 @@
       if (mp.isHost) {
         applyDeclare(msg);
       } else if (!mp.bestDeclare || msg.moveCount < mp.bestDeclare.moveCount) {
+        const isFirst = msg.isFirst != null ? msg.isFirst : !mp.bestDeclare;
         mp.bestDeclare = { peerId: msg.peerId, moveCount: msg.moveCount };
+        showRaceFlashBanner(isFirst, msg.peerId, msg.moveCount);
         if (msg.endTime) {
           mp.countdownKind = "declare";
           startDisplayCountdown(msg.endTime);
@@ -1408,6 +1568,8 @@
     document.getElementById("solo-controls").classList.add("hidden");
     document.getElementById("online-controls").classList.remove("hidden");
     document.getElementById("online-hud").classList.remove("hidden");
+    const playerBadge = document.getElementById("player-badge");
+    if (playerBadge) playerBadge.classList.remove("hidden");
     updateNewMapButtonForOnline();
 
     const playModeBadge = document.getElementById("play-mode-badge");
@@ -1481,6 +1643,9 @@
     document.getElementById("btn-online-giveup").addEventListener("click", giveUp);
     document.getElementById("btn-online-next-ready").addEventListener("click", nextRoundReady);
     document.getElementById("btn-watch-champion-replay").addEventListener("click", watchChampionReplay);
+    document.getElementById("btn-switch-to-solo").addEventListener("click", switchToSoloMode);
+    document.getElementById("btn-solo-suggest-wait").addEventListener("click", onSoloSuggestWait);
+    document.getElementById("btn-solo-suggest-switch").addEventListener("click", onSoloSuggestSwitch);
     document.getElementById("btn-new-map").addEventListener("click", () => {
       if (!window.__HR_ONLINE_ACTIVE || !mp || !mp.isHost) return;
       regenerateGame();
@@ -1508,6 +1673,7 @@
       if (overlay && !overlay.classList.contains("hidden")) {
         renderNextReadyPlayerList();
       }
+      checkAloneStatus();
     });
   }
 
@@ -1518,6 +1684,8 @@
     document.getElementById("solo-controls").classList.add("hidden");
     document.getElementById("online-controls").classList.remove("hidden");
     document.getElementById("online-hud").classList.remove("hidden");
+    const playerBadge = document.getElementById("player-badge");
+    if (playerBadge) playerBadge.classList.remove("hidden");
     updateNewMapButtonForOnline();
 
     const playModeBadge = document.getElementById("play-mode-badge");
@@ -1601,6 +1769,7 @@
     if (overlay && !overlay.classList.contains("hidden")) {
       renderNextReadyPlayerList();
     }
+    checkAloneStatus();
   };
 
   window._HRMultiplayerDebug = {

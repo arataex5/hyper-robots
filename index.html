@@ -131,6 +131,16 @@
               <button type="button" class="mini-option" data-value="off">準備確認無し</button>
             </div>
           </div>
+          <div class="room-setting-row">
+            <div class="room-setting-label-row">
+              <span class="room-setting-label">勝敗判定までの残り時間をデカデカと表示する</span>
+              <span class="setting-help" tabindex="0" data-tooltip="「する」を選ぶと、誰かが回答した時やギブアップした時に、勝敗判定までのカウントダウンを画面中央上側に大きな半透明の赤文字で表示します。">？</span>
+            </div>
+            <div class="room-setting-options" id="room-setting-bigcountdown">
+              <button type="button" class="mini-option selected" data-value="on">する</button>
+              <button type="button" class="mini-option" data-value="off">しない</button>
+            </div>
+          </div>
         </div>
 
         <div class="room-player-list" id="room-player-list"></div>
@@ -179,6 +189,9 @@
     <div id="round-result-banner" class="round-result-banner">
       <div class="round-result-banner-text"></div>
     </div>
+
+    <div id="big-countdown-display" class="big-countdown-display hidden"></div>
+    <div id="race-flash-banner" class="race-flash-banner"></div>
 
     <div id="goal-reveal-banner" class="goal-reveal-banner">
       <div class="goal-reveal-banner-icon" id="goal-reveal-banner-icon"></div>
@@ -259,7 +272,18 @@
       <button id="btn-online-reset" class="btn">⟲ リセット</button>
       <button id="btn-online-declare" class="btn btn-primary" disabled>📣 回答する</button>
       <button id="btn-online-giveup" class="btn btn-accent">🏳️ 答えが知りたい！（ギブアップ）</button>
+      <button id="btn-switch-to-solo" class="btn hidden">🧍 ソロモードに切り替える</button>
     </section>
+
+    <div id="solo-suggest-overlay" class="solo-suggest-overlay hidden">
+      <div class="solo-suggest-box">
+        <p class="solo-suggest-message">残りプレイヤーが一人となりました。ソロモードに切り替えますか？</p>
+        <div class="solo-suggest-actions">
+          <button type="button" class="btn" id="btn-solo-suggest-wait">待機する</button>
+          <button type="button" class="btn btn-primary" id="btn-solo-suggest-switch">ソロモードに切り替える</button>
+        </div>
+      </div>
+    </div>
 
     <div class="online-hud hidden" id="online-hud">
       <div class="online-hud-players" id="online-hud-players"></div>
