@@ -1455,8 +1455,8 @@
     };
     const colorMode = mp.colors && mp.colors.length >= 5 ? "five" : "four";
     const useDiagonals = !!(mp.settings && mp.settings.diagonals);
-    if (typeof window.HROnline === "object" && typeof window.HROnline.leaveRoom === "function") {
-      window.HROnline.leaveRoom();
+    if (typeof window.HROnline === "object" && typeof window.HROnline.leaveRoomPermanently === "function") {
+      window.HROnline.leaveRoomPermanently();
     }
     window.startHyperRobotsGame(colorMode, useDiagonals, presetState);
   }

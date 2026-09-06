@@ -684,8 +684,14 @@
     }
     hideThinkingOverlay();
     hideSolverFailedModal();
+    // 前の問題の探索器（IncrementalSolver）を確実に手放しておく。
+    // 新しい問題では startSolverForGoal() が必ず新しいインスタンスを
+    // 作り直すが、念のためここでも明示的に参照を切っておくことで、
+    // 「前の問題の記憶が残っているのでは」という混乱の余地を無くす。
+    solver = null;
     solverStatus = "idle";
     solverPath = null;
+    solverGeneration++; // 前の問題に紐づく、まだ実行されていない探索ステップを確実に無効化する
 
     goalIndex++;
     if (goalIndex >= targetQueue.length) {
@@ -718,6 +724,7 @@
     updateMoveCount();
     updateUndoRedoButtons();
     setStatus("新しい目標が現れました。ロボットをクリックして動かしてみましょう。", "");
+    updateNextGoalButtonLabels();
 
     startSolverForGoal(currentGoal);
   }
@@ -725,6 +732,15 @@
   function updateGoalsRemaining() {
     if (!goalsRemainingEl) return;
     goalsRemainingEl.textContent = gameOver ? "0" : String(Math.max(0, totalGoals - goalIndex));
+  }
+
+  // 今のお題が最後のお題かどうかで、「次の問題へ」ボタン（本体・ゴール
+  // できませんでしたのモーダル内の両方）の文言を「終了」に切り替える。
+  function updateNextGoalButtonLabels() {
+    const isLast = goalIndex >= targetQueue.length - 1;
+    if (btnNext) btnNext.textContent = isLast ? "終了" : "次の問題へ →";
+    const btnSolverNextGoal = document.getElementById("btn-solver-next-goal");
+    if (btnSolverNextGoal) btnSolverNextGoal.textContent = isLast ? "終了" : "次の問題へ進む";
   }
 
   // すべての目標が出そろったら終了とする
@@ -980,5 +996,7 @@
     getSolver: () => solver,
     restartSolverForGoal: (g) => { startSolverForGoal(g); },
     forceNotFound: () => { solverStatus = "not_found"; if (checkPollTimer) { clearInterval(checkPollTimer); checkPollTimer = null; } },
+    jumpToLastGoal: () => { goalIndex = targetQueue.length - 2; nextGoal(); },
+    isGameOver: () => gameOver,
   };
 })();

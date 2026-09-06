@@ -336,6 +336,20 @@
     myPeerId = null;
   }
 
+  // 「ソロモードに切り替える」等、このルームへは二度と戻ってこないことが
+  // 確定している離脱専用。通常の leaveRoom() は再接続に備えてトークンを
+  // 残すが、ここでは明示的に削除しておく。これをしないと、後で新しい
+  // ルームを作った際に、古いルームの参加者一覧にこのトークンを持つ
+  // 「幽霊」エントリが残ったままになり得て、思わぬ形で混ざり込む
+  // （分身が出る）原因になっていた。
+  function leaveRoomPermanently() {
+    const roomIdToClear = room ? room.roomId : null;
+    leaveRoom();
+    if (roomIdToClear && typeof window.HRNet.clearStoredToken === "function") {
+      window.HRNet.clearStoredToken(roomIdToClear);
+    }
+  }
+
   function toggleMyReady() {
     if (!room) return;
     const me = findPlayer(myPeerId);
@@ -562,6 +576,24 @@
     window.HRNet.on("app-message", (m) => handleAppMessage(m.from, m.payload));
     window.HRNet.on("peer-list-changed", onPeerListChanged);
     window.HRNet.on("host-changed", onHostChanged);
+    window.HRNet.on("self-was-unreachable-please-rejoin", handleSelfWasUnreachable);
+  }
+
+  // ホストと繋がらなくなった時、network.js側でルームの固定アドレスへ
+  // 実際に接続を試みた結果「相手はまだ生きている」と確認できた場合に
+  // 呼ばれる。＝自分の方が一時的に繋がらなくなっていただけなので、
+  // 自分をホストにはせず、同じルームへ静かに再参加し直す。
+  function handleSelfWasUnreachable() {
+    if (!room) return;
+    const roomIdToRejoin = room.roomId;
+    window.HRNet.leaveRoom();
+    room = null;
+    iAmHost = false;
+    myPeerId = null;
+    joinRoom(roomIdToRejoin).catch(() => {
+      // 再参加にも失敗した場合は、通常のハートビート検知に委ねる
+      // （次にどちらかが切断を検知した時、改めてこのフローが走る）。
+    });
   }
 
   // ================= ゲーム本編（宣言・検証レース） =================
@@ -702,6 +734,7 @@
     createRoom,
     joinRoom,
     leaveRoom,
+    leaveRoomPermanently,
     setLobbyStatus,
     setRoomStatus,
     serializeBoard,

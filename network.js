@@ -107,6 +107,13 @@
       // ストレージが使えない環境でも対戦自体はできるようにしておく
     }
   }
+  function clearStoredToken(roomId) {
+    try {
+      window.localStorage.removeItem("hr-token-" + roomId);
+    } catch (e) {
+      // noop
+    }
+  }
   function generateToken() {
     return "t-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
@@ -181,6 +188,7 @@
     const HEARTBEAT_INTERVAL_MS = 3000;
     const HEARTBEAT_TIMEOUT_MS = 9000;
     let heartbeatTimer = null;
+    let verifyingHostAlive = false; // ホストが本当に消えたのか確認中かどうか（多重に確認を始めないためのフラグ）
 
     function markPeerDisconnected(peerId) {
       const p = peers.get(peerId);
@@ -454,6 +462,33 @@
 
     function maybeMigrateHost() {
       if (hostPeerId && peers.has(hostPeerId) && peers.get(hostPeerId).connected) return;
+      // ここに来た時点では「ホストと繋がらなくなった」ことしか分からず、
+      // 「相手が本当に落ちたのか」「実は自分の接続の方が一時的に
+      // おかしくなっていただけなのか」を区別できていない。区別せずに
+      // 即座に自分をホストに昇格させると、後で本当のホストが生きて
+      // いた場合に「お互いが自分をホストだと思い込む」分裂状態を
+      // 招いてしまう（スマホのスリープ復帰時などに起きやすい）。
+      // そこで、自分がホストでない場合に限り、まずルームの固定
+      // アドレスへ実際に接続を試み、応答があるかどうかで判断する。
+      if (!isHost() && roomId && peer && !peer.destroyed && !verifyingHostAlive) {
+        verifyingHostAlive = true;
+        verifyHostStillAlive((alive) => {
+          verifyingHostAlive = false;
+          if (alive) {
+            // 相手はまだ生きている＝自分の方が一時的に繋がらなく
+            // なっていただけ。自分をホストにはせず、ルームへの
+            // 再参加を行うようにonline.js側へ知らせる。
+            emitter.emit("self-was-unreachable-please-rejoin");
+            return;
+          }
+          proceedWithHostElection();
+        });
+        return;
+      }
+      proceedWithHostElection();
+    }
+
+    function proceedWithHostElection() {
       // 自分自身も候補に含めて計算する
       const all = peerListArray().concat([
         { peerId: myPeerId, joinOrder: myJoinOrder, connected: true },
@@ -467,6 +502,38 @@
           broadcast({ type: "host-migrated", newHostPeerId: hostPeerId });
           claimRendezvousIfNeeded();
         }
+      }
+    }
+
+    // ルームの固定アドレス（roomIdToPeerId）へ実際に接続を試みることで、
+    // 今のホスト（またはホストを引き継いだ誰か）が本当にまだ生きて
+    // いるかどうかを確認する。生きていれば callback(true)、一定時間
+    // 応答がなければ callback(false) を呼ぶ。
+    function verifyHostStillAlive(callback) {
+      const targetPeerId = roomIdToPeerId(roomId);
+      let settled = false;
+      const finish = (alive) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { if (testConn) testConn.close(); } catch (e) { /* noop */ }
+        callback(alive);
+      };
+      // 相手が存在しない場合、PeerJSは接続オブジェクトではなく
+      // Peer本体側で "peer-unavailable" 等のerrorを発火することが
+      // 多いため、conn側だけでなくpeer側のerrorも見ておく。
+      // なお、このリスナーは（PeerJSの標準的なEventEmitter実装なら
+      // 使える）off()では明示的に外していない。settledガードにより、
+      // 後から無関係なerrorで再度呼ばれても何もしないため実害はない。
+      peer.on("error", () => finish(false));
+      let testConn;
+      const timer = setTimeout(() => finish(false), 4000);
+      try {
+        testConn = peer.connect(targetPeerId, { reliable: true });
+        testConn.on("open", () => finish(true));
+        testConn.on("error", () => finish(false));
+      } catch (e) {
+        finish(false);
       }
     }
 
@@ -742,6 +809,7 @@
       getPeerList: peerListArray,
       getMyJoinOrder: () => myJoinOrder,
       getMyToken: () => myToken,
+      clearStoredToken,
       // テスト用: 特定の相手の lastSeen を直接いじれるようにしておく
       // （スリープ中に時間だけが経過した状況を、実際に待たずに再現するため）。
       _debugSetLastSeen: (peerId, ts) => { const p = peers.get(peerId); if (p) p.lastSeen = ts; },
