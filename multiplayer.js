@@ -60,6 +60,7 @@
       totalRounds: cfg.targetOrder.length, // 1周分のお題数。「最後まで続ける」がオフの時の決着判定に使う
       matchOver: false,
       bestDeclare: null, // { peerId, moveCount }
+      lastChampionRoute: null, // { moves, startSnapshot } -- 直前のラウンドの勝者の手順（準備確認画面のリプレイ用）
       declared: false, // 自分がこのラウンドで既に宣言したか
       myDeclaredMoves: null, // 宣言した時点の手順のスナップショット
       myGiveUpVoted: false,
@@ -129,6 +130,7 @@
       totalRounds: snap.totalRounds,
       matchOver: snap.matchOver,
       bestDeclare: snap.bestDeclare ? { ...snap.bestDeclare } : null,
+      lastChampionRoute: null,
       declared: false,
       myDeclaredMoves: null,
       myGiveUpVoted: (snap.giveUpPeerIds || []).includes(cfg.myPeerId),
@@ -635,6 +637,7 @@
   }
 
   const GIVEUP_TIMEOUT_SEC = 60;
+  const SOLVER_TIME_BUDGET_MS = 10000; // コンピュータの探索に許す時間（オンライン対戦・ギブアップ後の答え合わせ用）
 
   function declare() {
     if (!mp.currentGoal || mp.matchOver) return;
@@ -784,6 +787,12 @@
     if (!mp.isHost || !mp.currentGoal) return;
     const simRobots = mp.roundStartSnapshot.map((p) => ({ ...p }));
     let valid = true;
+    // msg.moves は {robot, dir} のみ（宣言・検証にはそれで十分）だが、
+    // 後で「最短手のリプレイ」として再生する際には、斜め壁で曲がった
+    // 場合の経由点（bends）を含む実際の到達先情報が必要になる。
+    // ここでslide()を呼んだ時点でその情報が手に入るので、あわせて
+    // 記録しておく。
+    const replayMoves = [];
     msg.moves.forEach((step) => {
       if (!valid) return;
       const color = robotColor(step.robot);
@@ -793,6 +802,7 @@
         return;
       }
       simRobots[step.robot] = dest;
+      replayMoves.push({ robot: step.robot, dir: step.dir, to: { r: dest.r, c: dest.c }, bends: dest.bends || [] });
     });
     const g = mp.currentGoal;
     let reachedGoal = false;
@@ -810,6 +820,18 @@
     if (valid && reachedGoal && countMatches) {
       mp.scores[msg.peerId] = (mp.scores[msg.peerId] || 0) + 1;
       mp.roundsPlayed++;
+      // チャンピオン（宣言が承認されたプレイヤー）の検証済みの最終位置を
+      // ホスト自身のロボット状態にも反映しておく。これをしないと、
+      // ホスト自身がラウンド中に別の手を試していた場合、次のお題が
+      // 「チャンピオンがゴールした位置」ではなく「たまたまホストの
+      // 画面に残っていた位置」から始まってしまう。
+      mp.robots = simRobots;
+      // 次の準備確認画面で「最短手のリプレイ」として再生できるよう、
+      // チャンピオンの手順とゴール直前の開始位置を記録しておく。
+      mp.lastChampionRoute = {
+        moves: replayMoves,
+        startSnapshot: mp.roundStartSnapshot.map((p) => ({ ...p })),
+      };
       const decided = !mp.settings.playUntilEnd && isOutcomeDecided();
       mp.net.broadcast({
         type: "round-result",
@@ -818,8 +840,9 @@
         scores: mp.scores,
         roundsPlayed: mp.roundsPlayed,
         matchOver: decided,
+        championRoute: mp.lastChampionRoute,
       });
-      applyRoundResult({ winnerId: msg.peerId, moveCount: msg.moves.length, scores: mp.scores, roundsPlayed: mp.roundsPlayed, matchOver: decided });
+      applyRoundResult({ winnerId: msg.peerId, moveCount: msg.moves.length, scores: mp.scores, roundsPlayed: mp.roundsPlayed, matchOver: decided, championRoute: mp.lastChampionRoute });
       if (decided) {
         mp.matchOver = true;
       }
@@ -867,6 +890,7 @@
   function applyRoundResult(msg) {
     mp.scores = msg.scores;
     if (msg.roundsPlayed != null) mp.roundsPlayed = msg.roundsPlayed;
+    if (msg.championRoute) mp.lastChampionRoute = msg.championRoute; // ゲスト側にもリプレイ用に伝わるようにする
     const p = mp.players.find((x) => x.peerId === msg.winnerId);
     if (msg.matchOver) {
       mp.matchOver = true;
@@ -1007,18 +1031,30 @@
   function revealGiveUpAnswer() {
     if (!mp.isHost) return;
     mp.countdownKind = null;
+    setStatus("🤖 コンピュータが思考中です。しばらくお待ちください…");
     const goalColorIdx = mp.currentGoal.color === "rainbow" ? "any" : colorIndexOfColor(mp.currentGoal.color);
     const solver = new IncrementalSolver(mp.board, mp.roundStartSnapshot, goalColorIdx, mp.currentGoal.r, mp.currentGoal.c, mp.colors);
-    let solved = null;
-    const deadline = Date.now() + 4000;
-    while (Date.now() < deadline) {
+    const deadline = Date.now() + SOLVER_TIME_BUDGET_MS;
+    // ブロッキングのwhileループにすると、難しい盤面ではUIが最大10秒
+    // 固まってしまう。setTimeoutで少しずつ刻みながら進める
+    // （ソロモードの探索と同じ考え方）。
+    function tick() {
       const res = solver.step(20);
-      if (res.status === "found") { solved = res.path; break; }
-      if (res.status === "not_found") break;
+      if (res.status === "found") {
+        const msg = { type: "giveup-reveal", path: res.path };
+        mp.net.broadcast(msg);
+        applyGiveUpReveal(msg);
+        return;
+      }
+      if (res.status === "not_found" || Date.now() > deadline) {
+        const msg = { type: "giveup-reveal", path: [] };
+        mp.net.broadcast(msg);
+        applyGiveUpReveal(msg);
+        return;
+      }
+      setTimeout(tick, 0);
     }
-    const msg = { type: "giveup-reveal", path: solved || [] };
-    mp.net.broadcast(msg);
-    applyGiveUpReveal(msg);
+    tick();
   }
 
   function applyGiveUpReveal(msg) {
@@ -1027,8 +1063,13 @@
     setControlsLocked(true);
     const path = msg.path || [];
     if (path.length === 0) {
-      setStatus("😢 コンピュータでも手順を見つけられませんでした。");
-      showRoundResultBanner("引き分け！", awaitNextRoundReady);
+      // コンピュータでも見つけられなかった場合は、このラウンドが始まった
+      // 時点の位置までロボットを戻しておく（誰かの試行錯誤の跡を
+      // 残したまま次のお題に進んでしまわないようにする）。
+      mp.robots = mp.roundStartSnapshot.map((p) => ({ ...p }));
+      mp.robots.forEach((p, i) => setPercentPos(mp.robotEls[i], p.r, p.c));
+      setStatus("😢 コンピュータもゴールできませんでした！");
+      showRoundResultBanner("コンピュータもゴールできませんでした！引き分け！", awaitNextRoundReady);
       return;
     }
     setStatus(`🤖 コンピュータの最短手順は ${path.length}手 でした。`);
@@ -1107,6 +1148,13 @@
     if (overlay) overlay.classList.remove("hidden");
     const btn = document.getElementById("btn-online-next-ready");
     if (btn) btn.disabled = false;
+    const replayBtn = document.getElementById("btn-watch-champion-replay");
+    if (replayBtn) {
+      replayBtn.classList.toggle("hidden", !mp.lastChampionRoute);
+      replayBtn.disabled = false;
+    }
+    const veil = document.getElementById("next-ready-replay-veil");
+    if (veil) veil.classList.add("hidden");
     renderNextReadyPlayerList();
 
     if (mp.settings.nextReadyTimeout === "unlimited") {
@@ -1134,6 +1182,41 @@
     const overlay = document.getElementById("next-ready-overlay");
     if (overlay) overlay.classList.add("hidden");
     mp.countdownKind = null;
+  }
+
+  // 準備確認画面の「最短手のリプレイを見る」。カード全体を半透明にして
+  // 操作できないようにしたうえで、直前のラウンドの勝者の手順を最初から
+  // 再生する。終わったら、実際の（＝チャンピオンの最終到達位置である）
+  // ロボット状態に戻し、操作を再開できるようにする。
+  function watchChampionReplay() {
+    if (!mp.lastChampionRoute) return;
+    const veil = document.getElementById("next-ready-replay-veil");
+    const replayBtn = document.getElementById("btn-watch-champion-replay");
+    const readyBtn = document.getElementById("btn-online-next-ready");
+    if (veil) veil.classList.remove("hidden");
+    if (replayBtn) replayBtn.disabled = true;
+    if (readyBtn) readyBtn.disabled = true;
+
+    const route = mp.lastChampionRoute;
+    const positionToRestore = mp.robots.map((p) => ({ ...p })); // 再生前の（＝チャンピオンの最終到達位置のはずの）状態を退避
+    mp.robots = route.startSnapshot.map((p) => ({ ...p }));
+    mp.robots.forEach((p, i) => setPercentPos(mp.robotEls[i], p.r, p.c));
+
+    let i = 0;
+    function step() {
+      if (i >= route.moves.length) {
+        mp.robots = positionToRestore.map((p) => ({ ...p }));
+        mp.robots.forEach((p, idx) => setPercentPos(mp.robotEls[idx], p.r, p.c));
+        if (veil) veil.classList.add("hidden");
+        if (replayBtn) replayBtn.disabled = false;
+        if (readyBtn) readyBtn.disabled = mp.myReadyForNext;
+        return;
+      }
+      const s = route.moves[i++];
+      const waypoints = s.bends && s.bends.length > 0 ? [...s.bends, s.to] : [s.to];
+      animateAlongPath(s.robot, waypoints, step);
+    }
+    step();
   }
 
   function nextRoundReady() {
@@ -1397,6 +1480,7 @@
     document.getElementById("btn-online-declare").addEventListener("click", declare);
     document.getElementById("btn-online-giveup").addEventListener("click", giveUp);
     document.getElementById("btn-online-next-ready").addEventListener("click", nextRoundReady);
+    document.getElementById("btn-watch-champion-replay").addEventListener("click", watchChampionReplay);
     document.getElementById("btn-new-map").addEventListener("click", () => {
       if (!window.__HR_ONLINE_ACTIVE || !mp || !mp.isHost) return;
       regenerateGame();

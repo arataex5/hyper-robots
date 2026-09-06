@@ -526,8 +526,8 @@
       return;
     }
     if (solverStatus === "not_found") {
-      setStatus("コンピュータの回答は見つかりませんでした。", "warn");
-      btnCheck.disabled = false;
+      resetRobotsToSolverStart();
+      showSolverFailedModal();
       return;
     }
 
@@ -539,6 +539,13 @@
       thinkingShowTimer = null;
       if (solverStatus === "searching") showThinkingOverlay();
     }, 450);
+    pollSolverUntilSettled();
+  }
+
+  // ソルバーが「見つかった」か「（今回のタイムリミットまで）見つからな
+  // かった」のどちらかに落ち着くまで様子を見る。「もう少し探してもらう」
+  // で探索を延長した時にも、この同じポーリングを再利用する。
+  function pollSolverUntilSettled() {
     if (checkPollTimer) clearInterval(checkPollTimer);
     checkPollTimer = setInterval(() => {
       if (solverStatus === "found") {
@@ -551,10 +558,47 @@
         clearInterval(checkPollTimer);
         checkPollTimer = null;
         hideThinkingOverlay();
-        setStatus("コンピュータの回答は見つかりませんでした。", "warn");
-        btnCheck.disabled = false;
+        resetRobotsToSolverStart();
+        showSolverFailedModal();
       }
     }, 300);
+  }
+
+  // 見つけられなかった時、ロボットの位置をこの問題が始まった時点に戻す。
+  function resetRobotsToSolverStart() {
+    if (!solverStartSnapshot) return;
+    robots = cloneRobots(solverStartSnapshot);
+    ACTIVE_COLORS.forEach((_, idx) => setPercentPos(robotEls[idx], robots[idx].r, robots[idx].c));
+  }
+
+  function showSolverFailedModal() {
+    btnCheck.disabled = false;
+    const el = document.getElementById("solver-failed-overlay");
+    if (el) el.classList.remove("hidden");
+  }
+
+  function hideSolverFailedModal() {
+    const el = document.getElementById("solver-failed-overlay");
+    if (el) el.classList.add("hidden");
+  }
+
+  // 「もう少し探してもらう」：これまでの探索記録（IncrementalSolverの
+  // 内部状態）は消さず、同じsolverインスタンスのまま制限時間だけ
+  // 延長して探索を再開する。
+  function searchMoreForSolver() {
+    if (!solver) return;
+    hideSolverFailedModal();
+    solverStatus = "searching";
+    solverDeadline = Date.now() + SOLVER_TIME_BUDGET_MS;
+    btnCheck.disabled = true;
+    setStatus("🤖 コンピュータが思考中です。しばらくお待ちください…", "info");
+    if (thinkingShowTimer) clearTimeout(thinkingShowTimer);
+    thinkingShowTimer = setTimeout(() => {
+      thinkingShowTimer = null;
+      if (solverStatus === "searching") showThinkingOverlay();
+    }, 450);
+    scheduleSolverTick();
+    pollSolverUntilSettled();
   }
 
   async function revealAnswer(path) {
@@ -624,6 +668,7 @@
       thinkingShowTimer = null;
     }
     hideThinkingOverlay();
+    hideSolverFailedModal();
     solverStatus = "idle";
     solverPath = null;
 
@@ -816,6 +861,18 @@
     if (locked) return;
     nextGoal();
   });
+  const btnSolverFailedBack = document.getElementById("btn-solver-failed-back");
+  if (btnSolverFailedBack) btnSolverFailedBack.addEventListener("click", hideSolverFailedModal);
+  const btnSolverSearchMore = document.getElementById("btn-solver-search-more");
+  if (btnSolverSearchMore) btnSolverSearchMore.addEventListener("click", searchMoreForSolver);
+  const btnSolverNextGoal = document.getElementById("btn-solver-next-goal");
+  if (btnSolverNextGoal) {
+    btnSolverNextGoal.addEventListener("click", () => {
+      hideSolverFailedModal();
+      if (locked) return;
+      nextGoal();
+    });
+  }
 
   // ---------- boot ----------
   // タイトル画面（title.js）の「ゲームをはじめる」ボタンから呼び出される。
@@ -863,5 +920,10 @@
     },
     getSolverStatus: () => solverStatus,
     getBoard: () => board,
+    getCurrentGoal: () => currentGoal,
+    setCurrentGoal: (g) => { currentGoal = g; },
+    getRobots: () => robots,
+    getSolver: () => solver,
+    restartSolverForGoal: (g) => { startSolverForGoal(g); },
   };
 })();

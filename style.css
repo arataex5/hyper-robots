@@ -362,6 +362,55 @@ body {
   .thinking-spinner { animation: none !important; }
 }
 
+.solver-failed-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 918;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 18, 0.6);
+}
+.solver-failed-overlay.hidden { display: none; }
+.solver-failed-box {
+  position: relative;
+  width: min(92vw, 420px);
+  padding: 56px 24px 28px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 30px 70px -25px rgba(0,0,0,0.7);
+  text-align: center;
+}
+.solver-failed-back-btn {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 6px 8px;
+}
+.solver-failed-back-btn:hover { color: var(--text); }
+.solver-failed-message {
+  margin: 0 0 26px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.solver-failed-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.solver-failed-actions .btn {
+  width: 100%;
+}
+
 /* reactor core in the center 2x2 — a solid, permanently blocked area.
    Kept static on purpose (no glow/pulse animation). */
 .core {
@@ -1539,6 +1588,7 @@ body.title-active { overflow: hidden; }
   pointer-events: none;
 }
 .next-ready-card {
+  position: relative;
   width: min(94vw, 420px);
   max-height: 90vh;
   overflow-y: auto;
@@ -1549,6 +1599,21 @@ body.title-active { overflow: hidden; }
   text-align: center;
   box-shadow: 0 30px 70px -25px rgba(0,0,0,0.7);
 }
+.next-ready-replay-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 16px;
+}
+.next-ready-replay-btn.hidden { display: none; }
+.next-ready-replay-veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(14, 17, 26, 0.55);
+  border-radius: var(--radius-panel);
+  z-index: 5;
+  cursor: wait;
+}
+.next-ready-replay-veil.hidden { display: none; }
 .next-ready-heading {
   margin: 0 0 16px;
   font-family: "Space Grotesk", sans-serif;

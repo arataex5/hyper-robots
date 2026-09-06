@@ -199,6 +199,17 @@
       </div>
     </div>
 
+    <div id="solver-failed-overlay" class="solver-failed-overlay hidden">
+      <div class="solver-failed-box">
+        <button type="button" class="solver-failed-back-btn" id="btn-solver-failed-back">← ゲーム画面に戻る</button>
+        <p class="solver-failed-message">ゴールすることができませんでした。</p>
+        <div class="solver-failed-actions">
+          <button type="button" class="btn" id="btn-solver-search-more">もう少し探してもらう</button>
+          <button type="button" class="btn btn-primary" id="btn-solver-next-goal">次の問題へ進む</button>
+        </div>
+      </div>
+    </div>
+
     <header class="topbar">
       <h1 class="logo">ハイパーロボット</h1>
       <div class="player-badge" id="player-badge">
@@ -256,11 +267,13 @@
     </div>
 
     <div id="next-ready-overlay" class="next-ready-overlay hidden">
-      <div class="next-ready-card">
+      <div class="next-ready-card" id="next-ready-card">
         <h2 class="next-ready-heading">次の問題へ進む準備はいいですか？</h2>
         <div class="next-ready-countdown" id="next-ready-countdown"></div>
+        <button id="btn-watch-champion-replay" class="btn next-ready-replay-btn hidden">🎬 最短手のリプレイを見る</button>
         <div class="next-ready-player-list" id="next-ready-player-list"></div>
         <button id="btn-online-next-ready" class="btn btn-primary">👍 準備完了</button>
+        <div class="next-ready-replay-veil hidden" id="next-ready-replay-veil"></div>
       </div>
     </div>
 
