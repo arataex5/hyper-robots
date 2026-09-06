@@ -478,6 +478,16 @@
     });
     if (iAmHost) broadcastRoomState();
     else renderRoom();
+    // 対局中の場合、multiplayer.js側のHUDにも接続状況の変化を反映させる。
+    // multiplayer.js が独自に登録する "peer-list-changed" リスナーは
+    // resumeOnlineHyperRobotsGame() の中で（=ゲーム画面に切り替わって
+    // 初めて）登録されるため、再接続直後にメッシュ接続がちょうど確立
+    // した瞬間のイベントを取りこぼすことがある。online.js側のこの
+    // ハンドラは参加処理の最初から確実に登録されているので、ここでも
+    // 呼んでおくことで、その取りこぼしを防ぐ。
+    if (typeof window.refreshOnlineHud === "function") {
+      window.refreshOnlineHud();
+    }
   }
 
   function onHostChanged(newHostPeerId) {

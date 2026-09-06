@@ -265,6 +265,12 @@
             connectTo(p.peerId);
           }
         });
+        // "welcome" は自分のpeersマップを（既存メンバー全員分）まとめて
+        // 更新するが、これまでは "room-joined" しか発火しておらず、
+        // 対局中のHUD等、"peer-list-changed" だけを購読している側は
+        // この更新に一切気づけなかった（＝実際にはtrue/trueで正しい
+        // 情報が入っているのに、画面には反映されないまま固定される）。
+        emitter.emit("peer-list-changed", peerListArray());
         emitter.emit("room-joined", { peerList: peerListArray(), hostPeerId, yourToken: msg.yourToken });
       } else if (msg.type === "peer-joined") {
         const p = msg.peer;

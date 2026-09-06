@@ -1505,6 +1505,19 @@
   window.isOnlineGameActive = function () {
     return !!(mp && window.__HR_ONLINE_ACTIVE);
   };
+  // online.js側の「参加者一覧が変わった」処理から、HUDの接続状況表示を
+  // 最新化してもらうための入り口。resumeOnlineHyperRobotsGame() 内で
+  // 登録するリスナーだけに頼ると、再接続直後にメッシュ接続がちょうど
+  // 確立したタイミングのイベントを取りこぼし、実際にはつながっている
+  // 相手がいつまでも［切断中］のまま表示され続けることがある。
+  window.refreshOnlineHud = function () {
+    if (!window.__HR_ONLINE_ACTIVE || !mp) return;
+    renderHud();
+    const overlay = document.getElementById("next-ready-overlay");
+    if (overlay && !overlay.classList.contains("hidden")) {
+      renderNextReadyPlayerList();
+    }
+  };
 
   window._HRMultiplayerDebug = {
     getState: () => mp,
