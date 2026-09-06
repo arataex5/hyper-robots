@@ -399,6 +399,17 @@
     // 固定IDで待ち受けている、もう1本のrendezvousPeer」宛の接続の
     // どちらからも呼ばれる。
     function handleIncomingHostConnection(conn) {
+      // 「相手がまだ生きているか」を確かめるためだけの接続
+      // （verifyHostStillAlive から来るもの）は、参加者として登録せず、
+      // 繋がったことだけを相手に伝えて即座に閉じる。ここで通常の参加
+      // 処理に流してしまうと、トークンを持たない新規参加者として扱われ、
+      // 既存エントリを上書きしてしまう。
+      if (conn.metadata && conn.metadata.probe) {
+        conn.on("open", () => {
+          try { conn.close(); } catch (e) { /* noop */ }
+        });
+        return;
+      }
       // conn.metadata は接続が確立する前（"open"を待たず）から同期的に
       // 読める。ここで「再接続かどうか」を判定してしまうことで、
       // "hello"メッセージの到着タイミングに左右されなくなる。
@@ -468,9 +479,11 @@
       // 即座に自分をホストに昇格させると、後で本当のホストが生きて
       // いた場合に「お互いが自分をホストだと思い込む」分裂状態を
       // 招いてしまう（スマホのスリープ復帰時などに起きやすい）。
-      // そこで、自分がホストでない場合に限り、まずルームの固定
-      // アドレスへ実際に接続を試み、応答があるかどうかで判断する。
-      if (!isHost() && roomId && peer && !peer.destroyed && !verifyingHostAlive) {
+      // ただし、この確認は毎回の切断で走らせると負荷になるため、
+      // 「ルーム内で繋がっているのが自分だけになった」時に限定する。
+      // ＝実質、ホスト引き継ぎ処理の直前に一度だけ走る確認。
+      const someoneElseStillConnected = peerListArray().some((p) => p.connected);
+      if (!someoneElseStillConnected && !isHost() && roomId && peer && !peer.destroyed && !verifyingHostAlive) {
         verifyingHostAlive = true;
         verifyHostStillAlive((alive) => {
           verifyingHostAlive = false;
@@ -529,7 +542,13 @@
       let testConn;
       const timer = setTimeout(() => finish(false), 4000);
       try {
-        testConn = peer.connect(targetPeerId, { reliable: true });
+        // 生存確認専用の接続であることを metadata で明示する。これを
+        // 付けずに繋ぐと、受け取ったホスト側は「トークンを持たない
+        // 新規参加者」として扱い、新しいトークンを発行したうえで
+        // こちらの既存エントリを上書きしてしまう。その結果、本命の
+        // 再参加の時に自分のトークンが見つからず、別人（3人目）として
+        // 参加してしまっていた。
+        testConn = peer.connect(targetPeerId, { reliable: true, metadata: { probe: true } });
         testConn.on("open", () => finish(true));
         testConn.on("error", () => finish(false));
       } catch (e) {

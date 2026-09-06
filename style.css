@@ -1771,7 +1771,7 @@ body.title-active { overflow: hidden; }
 /* 勝敗判定までの残り時間の大表示（画面中央上側、半透明の赤文字） */
 .big-countdown-display {
   position: fixed;
-  top: 20vh;
+  top: 38vh;
   left: 50%;
   transform: translateX(-50%);
   z-index: 916;
