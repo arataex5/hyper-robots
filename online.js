@@ -299,6 +299,14 @@
     window.HRNet.leaveRoom();
     room = null;
     iAmHost = false;
+    // myPeerId をリセットし忘れると、タブを閉じずに（＝ページを再読み込み
+    // せずに）「タイトルへ戻る→再度参加する」を行った時、joinRoom()の
+    // 中で新しいpeerIdが代入されるより前に届いたゲーム関連メッセージ
+    // （"resume-game"等）の処理で、この古い値のまま mp.myPeerId が
+    // 組み立てられてしまう。その結果、mp.players のどのエントリとも
+    // 一致しない「透明人間」状態になる
+    // （操作はできるが、誰からも自分として認識されない）。
+    myPeerId = null;
   }
 
   function toggleMyReady() {
