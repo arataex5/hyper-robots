@@ -180,6 +180,7 @@ body {
   flex-direction: column;
   align-items: flex-end;
 }
+.stat.hidden { display: none; }
 .stat-label {
   font-size: 0.68rem;
   color: var(--text-faint);
@@ -1353,12 +1354,16 @@ body.title-active { overflow: hidden; }
   text-align: left;
 }
 .room-setting-reveal {
-  overflow: hidden;
+  /* 展開しきった状態では overflow を切らない。切ったままだと、
+     この行の中にあるツールチップ（？マークの説明）が行の外に
+     はみ出せず、見えなくなってしまう。 */
+  overflow: visible;
   max-height: 100px;
   opacity: 1;
   transition: max-height 0.35s ease, opacity 0.3s ease, margin 0.35s ease;
 }
 .room-setting-reveal.collapsed {
+  overflow: hidden;
   max-height: 0;
   opacity: 0;
   gap: 0;
@@ -1771,7 +1776,7 @@ body.title-active { overflow: hidden; }
 /* 勝敗判定までの残り時間の大表示（画面中央上側、半透明の赤文字） */
 .big-countdown-display {
   position: fixed;
-  top: 38vh;
+  top: 30vh;
   left: 50%;
   transform: translateX(-50%);
   z-index: 916;

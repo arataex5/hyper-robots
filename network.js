@@ -453,6 +453,9 @@
     // こうしておくことで、対局中にタブを閉じて後から戻ってきたプレイヤー
     // （ルームIDしか知らず、今の本当のホストの一時的なpeerIdは知らない）
     // も、常に同じ「ルームID」宛に接続するだけで今のホストにたどり着ける。
+    // ホスト引き継ぎ後、そのルームIDの「正面入口」（固定アドレス）も
+    // 引き継ぐ。ここが押さえられるかどうかが、実質「そのルームIDの
+    // 正当なホストは誰か」の唯一の判定になる。
     function claimRendezvousIfNeeded() {
       if (!isHost() || rendezvousPeer) return;
       if (myPeerId === roomIdToPeerId(roomId)) return; // 自分が元々のホストなら、本体のpeerIdがそのまま入口なので不要
@@ -461,13 +464,18 @@
         rendezvousPeer = rp;
         rp.on("connection", (conn) => handleIncomingHostConnection(conn));
         rp.on("error", () => {
-          // 既に誰か（旧ホストがまだ生きている等）がそのIDを使っている場合等。
-          // 致命的ではない：メッシュ自体は今のホストで機能し続けるので、
-          // ここでは静かに諦める（再接続してくる相手が来た時にまた試す）。
+          // そのIDが既に使われている＝旧ホストがまだ生きている、という
+          // ことなので、自分がホストを名乗るのをやめて、正当なホスト
+          // （その入口の持ち主）の側へ合流し直す。
+          // ここで黙って諦めてしまうと、同じルームIDに対してホストが
+          // 二人存在する状態（＝お互いが自分をホストだと思い込む分裂）
+          // がそのまま固定化してしまう。
           rendezvousPeer = null;
+          emitter.emit("self-was-unreachable-please-rejoin");
         });
       } catch (e) {
         rendezvousPeer = null;
+        emitter.emit("self-was-unreachable-please-rejoin");
       }
     }
 
@@ -483,7 +491,10 @@
       // 「ルーム内で繋がっているのが自分だけになった」時に限定する。
       // ＝実質、ホスト引き継ぎ処理の直前に一度だけ走る確認。
       const someoneElseStillConnected = peerListArray().some((p) => p.connected);
-      if (!someoneElseStillConnected && !isHost() && roomId && peer && !peer.destroyed && !verifyingHostAlive) {
+      // 自分自身がそのルームIDの正面入口そのものである場合（＝元々の
+      // ホスト）は、自分に対して生存確認を投げても意味がないので行わない。
+      const iAmTheFrontDoor = roomId && myPeerId === roomIdToPeerId(roomId);
+      if (!someoneElseStillConnected && !isHost() && !iAmTheFrontDoor && roomId && peer && !peer.destroyed && !verifyingHostAlive) {
         verifyingHostAlive = true;
         verifyHostStillAlive((alive) => {
           verifyingHostAlive = false;

@@ -532,6 +532,26 @@
     if (el) el.classList.add("hidden");
   }
 
+  // ゲーム画面に入った直後、ページ先頭のままだと盤面の下側が
+  // 隠れてしまうことがあるので、盤面全体が見える位置までスクロール
+  // しておく。ソロ・オンラインの両方から使うので window に出す。
+  window.scrollBoardIntoView = function () {
+    // レイアウト確定後に測りたいので、次の描画フレームまで待つ。
+    requestAnimationFrame(() => {
+      const wrap = document.querySelector(".board-wrap");
+      if (!wrap || typeof wrap.getBoundingClientRect !== "function") return;
+      const rect = wrap.getBoundingClientRect();
+      const viewportH = window.innerHeight || 0;
+      if (!rect.height || !viewportH) return;
+      // 盤面が画面内に収まるなら中央寄せ、収まらないなら上端を少し
+      // 余裕を持たせて合わせる。
+      const target = rect.height <= viewportH
+        ? window.scrollY + rect.top - (viewportH - rect.height) / 2
+        : window.scrollY + rect.top - 8;
+      window.scrollTo({ top: Math.max(0, target), behavior: "auto" });
+    });
+  };
+
   function onCheckClick() {
     if (locked || gameOver || roundState.answerRevealed) return;
     btnCheck.disabled = true;
@@ -731,7 +751,10 @@
 
   function updateGoalsRemaining() {
     if (!goalsRemainingEl) return;
-    goalsRemainingEl.textContent = gameOver ? "0" : String(Math.max(0, totalGoals - goalIndex));
+    // goalIndex は0始まりで「今出ているお題の番号」。今出ている分は
+    // 既に消化中なので、残りは totalGoals - (goalIndex + 1) となる。
+    // これを足し忘れると、常に1つ多く表示されてしまう。
+    goalsRemainingEl.textContent = gameOver ? "0" : String(Math.max(0, totalGoals - goalIndex - 1));
   }
 
   // 今のお題が最後のお題かどうかで、「次の問題へ」ボタン（本体・ゴール
@@ -944,6 +967,7 @@
     } else {
       newMap();
     }
+    window.scrollBoardIntoView();
   };
 
   // オンライン対戦で残り一人になった際、「ソロモードに切り替える」で

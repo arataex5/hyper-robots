@@ -719,8 +719,14 @@
 
   function updateGoalsRemaining() {
     const el = document.getElementById("goals-remaining");
+    const stat = document.getElementById("goals-remaining-stat");
+    // サドンデス中は「残りいくつ」という概念自体がない（決着がつくまで
+    // 続く）ので、この項目ごと隠す。
+    if (stat) stat.classList.toggle("hidden", !!mp.suddenDeathActive);
     if (!el) return;
-    el.textContent = mp.matchOver ? "0" : String(Math.max(0, mp.totalRounds - mp.goalIndex));
+    // goalIndex は0始まりで「今出ているお題の番号」。今出ている分は
+    // 既に消化中なので、残りは totalRounds - (goalIndex + 1) となる。
+    el.textContent = mp.matchOver ? "0" : String(Math.max(0, mp.totalRounds - mp.goalIndex - 1));
   }
 
   function shuffle(arr) {
@@ -1347,6 +1353,23 @@
     const goalColorIdx = mp.currentGoal.color === "rainbow" ? "any" : colorIndexOfColor(mp.currentGoal.color);
     const solver = new IncrementalSolver(mp.board, mp.roundStartSnapshot, goalColorIdx, mp.currentGoal.r, mp.currentGoal.c, mp.colors);
     const deadline = Date.now() + SOLVER_TIME_BUDGET_MS;
+    // すぐ見つかる場合にまで毎回オーバーレイを出すと煩わしいので、
+    // 少し待っても終わらない時だけ全員に「思考中…」を大きく出す
+    // （ソロモードと同じ考え方）。
+    let thinkingShown = false;
+    const thinkingTimer = setTimeout(() => {
+      if (!mp.giveUpRevealInProgress) return;
+      thinkingShown = true;
+      mp.net.broadcast({ type: "giveup-thinking" });
+      showGiveUpThinkingOverlay();
+    }, 600);
+    const finishThinking = () => {
+      clearTimeout(thinkingTimer);
+      if (thinkingShown) {
+        mp.net.broadcast({ type: "giveup-thinking-done" });
+      }
+      hideGiveUpThinkingOverlay();
+    };
     // ブロッキングのwhileループにすると、難しい盤面ではUIが最大10秒
     // 固まってしまう。setTimeoutで少しずつ刻みながら進める
     // （ソロモードの探索と同じ考え方）。
@@ -1354,6 +1377,7 @@
       const res = solver.step(20);
       if (res.status === "found") {
         mp.giveUpRevealInProgress = false;
+        finishThinking();
         const msg = { type: "giveup-reveal", path: res.path };
         mp.net.broadcast(msg);
         applyGiveUpReveal(msg);
@@ -1361,6 +1385,7 @@
       }
       if (res.status === "not_found" || Date.now() > deadline) {
         mp.giveUpRevealInProgress = false;
+        finishThinking();
         const msg = { type: "giveup-reveal", path: [] };
         mp.net.broadcast(msg);
         applyGiveUpReveal(msg);
@@ -1369,6 +1394,16 @@
       setTimeout(tick, 0);
     }
     tick();
+  }
+
+  function showGiveUpThinkingOverlay() {
+    const el = document.getElementById("thinking-overlay");
+    if (el) el.classList.remove("hidden");
+  }
+
+  function hideGiveUpThinkingOverlay() {
+    const el = document.getElementById("thinking-overlay");
+    if (el) el.classList.add("hidden");
   }
 
   function applyGiveUpReveal(msg) {
@@ -1543,6 +1578,13 @@
   }
 
   function awaitNextRoundReady() {
+    // 最後のお題が終わった直後は、次のお題が存在しないので準備確認を
+    // 出さない（このまま endMatch() 側の決着処理へ進む）。サドンデス中は
+    // お題が尽きるという概念がないので対象外。
+    if (mp.matchOver || (!mp.suddenDeathActive && mp.goalIndex >= mp.totalRounds - 1)) {
+      if (mp.isHost) nextGoal();
+      return;
+    }
     if (mp.settings.nextReadyTimeout === "off") {
       // 準備確認をスキップして、すぐ次の目標へ（実際に進行させるのはホストだけ）
       if (mp.isHost) nextGoal();
@@ -1740,7 +1782,12 @@
       applyGiveUpCountdownStart(msg);
     } else if (msg.type === "giveup-cancelled") {
       applyGiveUpCancelled();
+    } else if (msg.type === "giveup-thinking") {
+      showGiveUpThinkingOverlay();
+    } else if (msg.type === "giveup-thinking-done") {
+      hideGiveUpThinkingOverlay();
     } else if (msg.type === "giveup-reveal") {
+      hideGiveUpThinkingOverlay(); // 念のため（thinking-done を取りこぼしても必ず閉じる）
       applyGiveUpReveal(msg);
     } else if (msg.type === "next-ready") {
       if (mp.isHost) applyNextReady(msg);
@@ -1841,6 +1888,13 @@
     document.getElementById("online-hud").classList.remove("hidden");
     const playerBadge = document.getElementById("player-badge");
     if (playerBadge) playerBadge.classList.remove("hidden");
+    // 前回の対戦で「残り一人」になって表示されたままだと、新しい
+    // ルームでも最初から見えてしまうので、対戦開始時に必ず隠す。
+    const switchSoloBtn = document.getElementById("btn-switch-to-solo");
+    if (switchSoloBtn) switchSoloBtn.classList.add("hidden");
+    const soloSuggestOverlay = document.getElementById("solo-suggest-overlay");
+    if (soloSuggestOverlay) soloSuggestOverlay.classList.add("hidden");
+    if (typeof window.scrollBoardIntoView === "function") window.scrollBoardIntoView();
     updateNewMapButtonForOnline();
 
     const playModeBadge = document.getElementById("play-mode-badge");
@@ -1959,6 +2013,13 @@
     document.getElementById("online-hud").classList.remove("hidden");
     const playerBadge = document.getElementById("player-badge");
     if (playerBadge) playerBadge.classList.remove("hidden");
+    // 前回の対戦で「残り一人」になって表示されたままだと、新しい
+    // ルームでも最初から見えてしまうので、対戦開始時に必ず隠す。
+    const switchSoloBtn = document.getElementById("btn-switch-to-solo");
+    if (switchSoloBtn) switchSoloBtn.classList.add("hidden");
+    const soloSuggestOverlay = document.getElementById("solo-suggest-overlay");
+    if (soloSuggestOverlay) soloSuggestOverlay.classList.add("hidden");
+    if (typeof window.scrollBoardIntoView === "function") window.scrollBoardIntoView();
     updateNewMapButtonForOnline();
 
     const playModeBadge = document.getElementById("play-mode-badge");
