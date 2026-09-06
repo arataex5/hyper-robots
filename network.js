@@ -250,6 +250,56 @@
         myJoinOrder = msg.you.joinOrder;
         hostPeerId = msg.hostPeerId;
         myToken = msg.yourToken || myToken; // メッシュ接続にも載せられるよう、先に確定させておく
+        // 「今つないだ相手（fromPeerId）」と「本来のホストのID
+        // （hostPeerId）」が食い違うことがある——ホスト引き継ぎ後、
+        // 新ホストがルームID由来の固定アドレス（rendezvous）で
+        // 待ち受けているところへ接続した場合がこれにあたる。この
+        // 場合、何もしないと「実際に開通しているconnを持つエントリ
+        // （fromPeerId）」と「hostPeerIdとして参照される、conn を
+        // 持たないエントリ」の2つに分裂してしまい、後で本当にホストが
+        // 切断した時、切断が検知されるのは前者だけなので、
+        // maybeMigrateHost() のガード判定（hostPeerId側を見る）は
+        // ずっと「まだ繋がっている」と誤認したままになる
+        // ——結果、二度目のホスト引き継ぎが永久に起こらなくなる。
+        // そこで、実際に繋いだ側のconnを、本来のホストIDの方に
+        // 付け替えて一本化しておく。
+        if (hostPeerId && hostPeerId !== fromPeerId) {
+          const rendezvousEntry = peers.get(fromPeerId);
+          const realConn = rendezvousEntry ? rendezvousEntry.conn : null;
+          peers.delete(fromPeerId);
+          if (realConn) {
+            const existingHostEntry = peers.get(hostPeerId);
+            if (existingHostEntry) {
+              existingHostEntry.conn = realConn;
+              existingHostEntry.connected = true;
+              existingHostEntry.connecting = false;
+              existingHostEntry.lastSeen = Date.now();
+            } else {
+              peers.set(hostPeerId, {
+                peerId: hostPeerId,
+                profile: (rendezvousEntry && rendezvousEntry.profile) || null,
+                joinOrder: (rendezvousEntry && rendezvousEntry.joinOrder) || 0,
+                connected: true,
+                conn: realConn,
+                isCpu: false,
+                connecting: false,
+                token: (rendezvousEntry && rendezvousEntry.token) || null,
+                lastSeen: Date.now(),
+              });
+            }
+            // 以降、このconnから届くデータは新しいキー（hostPeerId）に
+            // 対する生存確認として扱われるよう、close/errorのイベント
+            // ハンドラも合わせて張り替えておく必要はない
+            // ——wireConnection内のハンドラは conn.peer
+            // （＝dialした相手の本当のpeer id = fromPeerId）を見て
+            // peers.get(conn.peer) するため、そのままではズレたままに
+            // なる。実利用ではconn.peerを書き換えられないので、
+            // このconnに対するclose/errorが発生した際は、
+            // markPeerDisconnectedForConn 経由でhostPeerId側も
+            // 一緒に切断扱いにする。
+            realConn.__hrAliasPeerId = hostPeerId;
+          }
+        }
         msg.peerList.forEach((p) => {
           if (p.peerId === myPeerId) return;
           if (!peers.has(p.peerId)) {
@@ -260,7 +310,7 @@
         });
         // 自分より参加順が古い相手には自分から接続しにいく
         peers.forEach((p) => {
-          if (p.peerId === fromPeerId) return; // ホストとは接続済み
+          if (p.peerId === hostPeerId) return; // ホストとは接続済み
           if (shouldInitiateConnection(myJoinOrder, p.joinOrder)) {
             connectTo(p.peerId);
           }
@@ -424,21 +474,26 @@
         emitter.emit("peer-connected", conn.peer);
         emitter.emit("peer-list-changed", peerListArray());
       });
-      conn.on("data", (raw) => handleIncomingData(conn.peer, raw));
+      conn.on("data", (raw) => handleIncomingData(conn.__hrAliasPeerId || conn.peer, raw));
       conn.on("close", () => {
-        const p = peers.get(conn.peer);
+        // welcome処理でrendezvous経由のconnをホスト本来のIDへ付け替えた
+        // 場合、conn.peer自体は（PeerJSの実体としては）rendezvousの
+        // アドレスのままなので、__hrAliasPeerId があればそちらを優先する。
+        const targetId = conn.__hrAliasPeerId || conn.peer;
+        const p = peers.get(targetId);
         if (p) p.connected = false;
-        emitter.emit("peer-disconnected", conn.peer);
+        emitter.emit("peer-disconnected", targetId);
         emitter.emit("peer-list-changed", peerListArray());
         if (isHost()) {
-          broadcast({ type: "peer-left", peerId: conn.peer });
+          broadcast({ type: "peer-left", peerId: targetId });
         }
         maybeMigrateHost();
       });
       conn.on("error", () => {
-        const p = peers.get(conn.peer);
+        const targetId = conn.__hrAliasPeerId || conn.peer;
+        const p = peers.get(targetId);
         if (p) p.connected = false;
-        emitter.emit("peer-disconnected", conn.peer);
+        emitter.emit("peer-disconnected", targetId);
         emitter.emit("peer-list-changed", peerListArray());
         maybeMigrateHost();
       });

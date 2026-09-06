@@ -506,7 +506,6 @@ body {
 .robot.color-yellow .body { background: linear-gradient(160deg, #f0cd6d, var(--c-yellow)); }
 .robot.color-black .body {
   background: linear-gradient(160deg, #5c6372, #21242e);
-  border-color: rgba(255,255,255,0.75);
 }
 .robot.color-red .label { color: var(--c-red); }
 .robot.color-blue .label { color: var(--c-blue); }
