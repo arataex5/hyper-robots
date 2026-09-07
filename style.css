@@ -95,7 +95,16 @@ body {
   border-color: #5a7fd6;
 }
 
-.topbar .btn { margin-left: auto; }
+/* 3つのボタン（遊び方・タイトルへ戻る・新しいマップ）をひとまとめにして
+   右端に寄せる。右端が「新しいマップ」で、そこから左へ詰めて並ぶ。 */
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 
 /* ---------- buttons ---------- */
 
@@ -1984,8 +1993,10 @@ body.title-active { overflow: hidden; }
   /* 盤面：横幅いっぱいに使いつつ、縦にも収まるよう高さでも上限をかける。
      --vh は pwa.js が実際の表示領域から計算して入れている
      （アドレスバーの分だけ 100vh がはみ出すのを避けるため）。 */
+  /* 盤面の大きさは横幅だけで決める。画面の高さを混ぜると、スクロールで
+     アドレスバーが出入りするたびに盤面が伸び縮みしてしまう。 */
   .board {
-    width: min(100%, calc(var(--vh, 1vh) * 58), 640px);
+    width: min(100%, 640px);
     border-width: 2px;
   }
 
@@ -2008,9 +2019,15 @@ body.title-active { overflow: hidden; }
     padding: 10px 12px;
     font-size: 0.8rem;
   }
-  /* 主要な操作（回答・ギブアップ）は目立つように一行使う */
-  #btn-online-declare,
-  #btn-online-giveup,
+  /* 回答する／ギブアップ（オンライン）、答え合わせ／次の問題へ（ソロ）は
+     ロボット選択ボタンの真下に、画面左端から横並びで詰める。
+     「ソロモードに切り替える」だけはその下に単独で出す。 */
+  .controls {
+    justify-content: flex-start;
+  }
+  .controls .btn {
+    flex: 0 1 auto;
+  }
   #btn-switch-to-solo {
     flex: 1 1 100%;
   }
@@ -2020,7 +2037,7 @@ body.title-active { overflow: hidden; }
 }
 
 @media (max-width: 480px) {
-  .board { width: min(100%, calc(var(--vh, 1vh) * 55), 640px); }
+  .board { width: min(100%, 640px); }
 
   .logo { font-size: 1.05rem; }
   .goal-panel { padding: 9px 10px; }
@@ -2056,7 +2073,7 @@ body.title-active { overflow: hidden; }
 /* 横向き（ランドスケープ）で高さが足りない時は、盤面を高さ基準に合わせる */
 @media (max-height: 560px) and (orientation: landscape) {
   .app { padding-top: 8px; padding-bottom: 8px; gap: 8px; }
-  .board { width: min(100%, calc(var(--vh, 1vh) * 80), 640px); }
+  .board { width: min(100%, 74vw, 640px); }
   .how-to { display: none; }
 }
 
@@ -2208,17 +2225,14 @@ body.title-active { overflow: hidden; }
   .dpad-s { grid-column: 2; grid-row: 3; }
 
   /* 操作パネルを置いた分、盤面の高さ上限を少し下げる */
-  .board { width: min(100%, calc(var(--vh, 1vh) * 48), 640px); }
-
-  /* 盤面上の矢印はスマホでは方向キーに任せる（指で隠れるため） */
-  .move-arrow { display: none; }
+  .board { width: min(100%, 640px); }
 
   /* 答え合わせ・次の問題へ は操作パネルの下に横並びで */
   #solo-controls .btn { flex: 1 1 40%; }
 }
 
 @media (max-width: 480px) {
-  .board { width: min(100%, calc(var(--vh, 1vh) * 45), 640px); }
+  .board { width: min(100%, 640px); }
   .touch-dpad { grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); }
   .touch-robot { width: 40px; height: 40px; }
   .touch-btn { min-width: 40px; min-height: 42px; font-size: 1rem; }
@@ -2276,4 +2290,23 @@ body.title-active { overflow: hidden; }
   .board-wrap  { order: 4; }
   .touch-deck  { order: 5; }
   .controls    { order: 6; }
+}
+
+/* ---------- スマホ：盤面と操作パネルの間隔を詰める ---------- */
+@media (max-width: 700px) {
+  /* 盤面のすぐ下に操作パネルが来るように、上下の余白を削る。
+     （左側の補助ボタン群が盤面の左下に張り付くイメージ） */
+  .board-wrap { margin-bottom: 0; }
+  .touch-deck { margin-top: -4px; }
+  .controls { margin-top: -2px; }
+}
+
+/* ---------- スマホ：上部3ボタンを隙間なく右詰めに ---------- */
+@media (max-width: 700px) {
+  .topbar-actions { gap: 0; }
+  .topbar-actions .btn { border-radius: 0; }
+  .topbar-actions .btn:first-child { border-top-left-radius: var(--radius-btn); border-bottom-left-radius: var(--radius-btn); }
+  .topbar-actions .btn:last-child { border-top-right-radius: var(--radius-btn); border-bottom-right-radius: var(--radius-btn); }
+  /* 隣り合う境界線が二重に見えないように重ねる */
+  .topbar-actions .btn + .btn { margin-left: -1px; }
 }

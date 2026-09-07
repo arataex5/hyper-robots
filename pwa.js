@@ -13,13 +13,23 @@
   // スマホのアドレスバーの高さが変わっても画面いっぱいに収まるように、
   // 実際に見えている高さを CSS 変数（--vh）として渡す。
   // 100vh はアドレスバーの分だけはみ出すことがあるため。
-  function setViewportHeight() {
-    document.documentElement.style.setProperty("--vh", window.innerHeight * 0.01 + "px");
+  // スマホでスクロールするとアドレスバーが出たり隠れたりして
+  // window.innerHeight が数十px単位で変化し、そのたびに resize が飛ぶ。
+  // 毎回 --vh を更新すると、それを使っているレイアウトが画面上部・下部
+  // に当たるたびに伸び縮みして落ち着かない。
+  // そこで「画面の向きが変わった」と言えるくらい大きく変わった時だけ
+  // 更新する。アドレスバーの出入り程度（おおむね150px未満）は無視する。
+  var lastH = 0;
+  function setViewportHeight(force) {
+    var h = window.innerHeight;
+    if (!force && lastH && Math.abs(h - lastH) < 150) return;
+    lastH = h;
+    document.documentElement.style.setProperty("--vh", h * 0.01 + "px");
   }
-  setViewportHeight();
-  window.addEventListener("resize", setViewportHeight);
+  setViewportHeight(true);
+  window.addEventListener("resize", function () { setViewportHeight(false); });
   window.addEventListener("orientationchange", function () {
     // 回転直後はまだ古いサイズが返ることがあるので、少し待ってから測る。
-    setTimeout(setViewportHeight, 200);
+    setTimeout(function () { setViewportHeight(true); }, 200);
   });
 })();

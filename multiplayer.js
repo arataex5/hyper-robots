@@ -2181,7 +2181,7 @@
     move: (dir) => {
       if (!mp || mp.locked || mp.matchOver || mp.selectedRobot === null) return;
       if (!window.canMoveAtAll(mp.board, mp.robots, mp.selectedRobot, dir, mp.colors[mp.selectedRobot])) return;
-      performUserMove(mp.selectedRobot, dir);
+      performMove(mp.selectedRobot, dir);
       if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
     },
     undo: () => { undo(); if (typeof window.syncTouchDeck === "function") window.syncTouchDeck(); },

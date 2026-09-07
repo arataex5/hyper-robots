@@ -537,20 +537,24 @@
   // ゲーム画面に入った直後、ページ先頭のままだと盤面の下側が
   // 隠れてしまうことがあるので、盤面全体が見える位置までスクロール
   // しておく。ソロ・オンラインの両方から使うので window に出す。
+  // ゲーム開始時は、ページの一番下（操作ボタンが見える位置）から
+  // 始める。盤面より操作系を先に見せたいため。
   window.scrollBoardIntoView = function () {
-    // レイアウト確定後に測りたいので、次の描画フレームまで待つ。
+    // レイアウト確定後に測りたいので、描画を2フレーム待ってから。
+    // 盤面や操作パネルの高さが決まる前だと、正しい最下部が取れない。
     requestAnimationFrame(() => {
-      const wrap = document.querySelector(".board-wrap");
-      if (!wrap || typeof wrap.getBoundingClientRect !== "function") return;
-      const rect = wrap.getBoundingClientRect();
-      const viewportH = window.innerHeight || 0;
-      if (!rect.height || !viewportH) return;
-      // 盤面が画面内に収まるなら中央寄せ、収まらないなら上端を少し
-      // 余裕を持たせて合わせる。
-      const target = rect.height <= viewportH
-        ? window.scrollY + rect.top - (viewportH - rect.height) / 2
-        : window.scrollY + rect.top - 8;
-      window.scrollTo({ top: Math.max(0, target), behavior: "auto" });
+      requestAnimationFrame(() => {
+        const doc = document.documentElement;
+        const bottom = Math.max(
+          document.body ? document.body.scrollHeight : 0,
+          doc ? doc.scrollHeight : 0
+        );
+        // 一部の環境（テスト用のDOM実装など）では scrollTo が無いので、
+        // 実行できる時だけ呼ぶ。
+        if (typeof window.scrollTo === "function") {
+          try { window.scrollTo({ top: bottom, behavior: "auto" }); } catch (e) { /* noop */ }
+        }
+      });
     });
   };
 
