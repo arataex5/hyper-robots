@@ -460,10 +460,11 @@
         }
         if (netP.token && !p.token) {
           p.token = netP.token;
-          // tokenが後から分かった時点で、同じtokenを持つ「切断中」の
-          // 別エントリ（＝先に接続イベントだけ処理されて出来た別人扱いの
+          // tokenが後から分かった時点で、同じtokenを持つ別エントリ
+          // （＝先に接続イベントだけ処理されて出来た別人扱いの
           // ゴースト）が無いか確認し、あれば統合する。
-          const ghost = room.players.find((pl) => pl !== p && pl.token === netP.token && !pl.connected);
+          // 上と同じ理由で、接続状態は条件に含めない。
+          const ghost = room.players.find((pl) => pl !== p && pl.token === netP.token);
           if (ghost) {
             const oldPeerId = ghost.peerId;
             room.players = room.players.filter((pl) => pl !== ghost);
@@ -476,11 +477,16 @@
         // 切断・復帰しても特別なモード切り替えは行わない。無操作のまま
         // 置いておくだけで、戻ってくれば通常通り操作を再開できる。
       } else if (netP.connected) {
-        // 同じ token を持つ「切断中」のプレイヤーがいれば、新規参加では
-        // なく本人の再接続として扱う（PeerJSは参加のたびに新しいpeerIdを
-        // 振るため、tokenで見分けないと毎回「別人」に見えてしまう）
+        // 同じ token を持つプレイヤーがいれば、新規参加ではなく本人の
+        // 再接続として扱う（PeerJSは参加のたびに新しいpeerIdを振るため、
+        // tokenで見分けないと毎回「別人」に見えてしまう）。
+        // ここで「切断中のエントリだけ」を対象にすると、ネットワークが
+        // 一瞬途切れて再参加した場合（スリープ復帰など）に、古いエントリが
+        // まだ connected: true のままで残っていて一致せず、同じ人が
+        // 「分身」として二重に増えてしまう。tokenが一致する時点で
+        // 同一人物と確定できるので、接続状態は条件に含めない。
         const ghost = netP.token
-          ? room.players.find((pl) => pl.token && pl.token === netP.token && !pl.connected)
+          ? room.players.find((pl) => pl.token && pl.token === netP.token && pl.peerId !== netP.peerId)
           : null;
         if (ghost) {
           const oldPeerId = ghost.peerId;

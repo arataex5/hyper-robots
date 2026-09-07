@@ -496,8 +496,15 @@
       const iAmTheFrontDoor = roomId && myPeerId === roomIdToPeerId(roomId);
       if (!someoneElseStillConnected && !isHost() && !iAmTheFrontDoor && roomId && peer && !peer.destroyed && !verifyingHostAlive) {
         verifyingHostAlive = true;
+        // このセッションを識別しておき、確認が終わった時点で
+        // 「まだ同じルーム・同じpeerのままか」を見る。途中で退室・
+        // 再参加が起きていた場合、この古い確認の結果で
+        // ホストを決めてしまわないようにする。
+        const sessionPeer = peer;
+        const sessionRoomId = roomId;
         verifyHostStillAlive((alive) => {
           verifyingHostAlive = false;
+          if (peer !== sessionPeer || roomId !== sessionRoomId) return; // 途中で状況が変わっていたので破棄
           if (alive) {
             // 相手はまだ生きている＝自分の方が一時的に繋がらなく
             // なっていただけ。自分をホストにはせず、ルームへの
@@ -536,35 +543,51 @@
     function verifyHostStillAlive(callback) {
       const targetPeerId = roomIdToPeerId(roomId);
       let settled = false;
+      // 一発勝負で判定すると、スリープ復帰直後などで一時的に接続が
+      // 通らなかっただけの時に「相手は落ちた」と誤判定してしまう。
+      // 3秒の猶予の中で繰り返し参加を試み、その間に一度でも繋がれば
+      // 「相手は生きている」とみなす。3秒使い切って一度も繋がらな
+      // かった場合に限り、ホストを引き継ぐ側へ進む。
+      const VERIFY_WINDOW_MS = 3000;
+      const RETRY_INTERVAL_MS = 500;
+      const deadline = Date.now() + VERIFY_WINDOW_MS;
+      const conns = [];
       const finish = (alive) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
-        try { if (testConn) testConn.close(); } catch (e) { /* noop */ }
+        clearTimeout(windowTimer);
+        conns.forEach((c) => {
+          try { c.close(); } catch (e) { /* noop */ }
+        });
         callback(alive);
       };
+      const windowTimer = setTimeout(() => finish(false), VERIFY_WINDOW_MS);
       // 相手が存在しない場合、PeerJSは接続オブジェクトではなく
       // Peer本体側で "peer-unavailable" 等のerrorを発火することが
-      // 多いため、conn側だけでなくpeer側のerrorも見ておく。
-      // なお、このリスナーは（PeerJSの標準的なEventEmitter実装なら
-      // 使える）off()では明示的に外していない。settledガードにより、
-      // 後から無関係なerrorで再度呼ばれても何もしないため実害はない。
-      peer.on("error", () => finish(false));
-      let testConn;
-      const timer = setTimeout(() => finish(false), 4000);
-      try {
-        // 生存確認専用の接続であることを metadata で明示する。これを
-        // 付けずに繋ぐと、受け取ったホスト側は「トークンを持たない
-        // 新規参加者」として扱い、新しいトークンを発行したうえで
-        // こちらの既存エントリを上書きしてしまう。その結果、本命の
-        // 再参加の時に自分のトークンが見つからず、別人（3人目）として
-        // 参加してしまっていた。
-        testConn = peer.connect(targetPeerId, { reliable: true, metadata: { probe: true } });
-        testConn.on("open", () => finish(true));
-        testConn.on("error", () => finish(false));
-      } catch (e) {
-        finish(false);
+      // 多い。ただしここでは即座に失敗と決めつけず、猶予時間内の
+      // 再試行に任せる（1回の失敗＝相手が落ちた、とは限らないため）。
+      peer.on("error", () => { /* 猶予時間内は無視して再試行に任せる */ });
+
+      function attempt() {
+        if (settled) return;
+        if (Date.now() >= deadline) return; // windowTimer 側で決着する
+        try {
+          // 生存確認専用の接続であることを metadata で明示する。これを
+          // 付けずに繋ぐと、受け取ったホスト側は「トークンを持たない
+          // 新規参加者」として扱い、新しいトークンを発行したうえで
+          // こちらの既存エントリを上書きしてしまう。その結果、本命の
+          // 再参加の時に自分のトークンが見つからず、別人（3人目）として
+          // 参加してしまっていた。
+          const testConn = peer.connect(targetPeerId, { reliable: true, metadata: { probe: true } });
+          conns.push(testConn);
+          testConn.on("open", () => finish(true));
+          testConn.on("error", () => { /* この試行は失敗。次の試行を待つ */ });
+        } catch (e) {
+          // この試行は失敗。次の試行を待つ。
+        }
+        setTimeout(attempt, RETRY_INTERVAL_MS);
       }
+      attempt();
     }
 
     function wireConnection(conn, remoteJoinOrder, remoteProfile, remoteToken) {
@@ -802,6 +825,11 @@
       hostPeerId = null;
       roomId = null;
       myProfileForHost = null;
+      // 生存確認の途中で退室した場合、そのコールバックはもう呼ばれない
+      // （peerを壊したため）ので、このフラグを戻し忘れると「確認中」の
+      // ままになり、次からの生存確認が永久に始まらなくなる。
+      // ＝2回目以降のスリープ復帰で復帰できなくなる原因。
+      verifyingHostAlive = false;
     }
 
     function sendApp(payload) {
