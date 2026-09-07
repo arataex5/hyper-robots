@@ -2,8 +2,21 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>ハイパーロボット</title>
+<meta name="description" content="ロボットを滑らせてゴールを目指す思考パズル。一人でも、みんなでも遊べます。">
+
+<!-- PWA（ホーム画面に追加して、アプリのように遊べるようにする） -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0e111a">
+<link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<!-- iOS でホーム画面から起動した時に、アドレスバー無しの全画面にする -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ハイパーロボット">
+
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="title-active">
@@ -359,5 +372,6 @@
   <script src="online.js"></script>
   <script src="multiplayer.js"></script>
   <script src="title.js"></script>
+  <script src="pwa.js"></script>
 </body>
 </html>

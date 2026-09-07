@@ -39,12 +39,20 @@ body {
   font-family: "Inter", system-ui, -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100%;
+  /* スマホでタップした時に出る灰色の四角を消す（自前の :active 表現を使う） */
+  -webkit-tap-highlight-color: transparent;
+  /* 画面端で引っ張った時に、ページ全体がゴムのように動くのを抑える */
+  overscroll-behavior-y: none;
+  /* 横方向にはみ出して横スクロールが出るのを防ぐ */
+  overflow-x: hidden;
 }
 
 .app {
   max-width: 720px;
   margin: 0 auto;
-  padding: 20px 16px 56px;
+  /* ノッチやホームバーに重ならないよう、端末が申告する安全領域を足す */
+  padding: calc(20px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+           calc(56px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1953,4 +1961,101 @@ body.title-active { overflow: hidden; }
   font-size: 0.8rem;
   color: var(--text-dim);
   min-height: 1.2em;
+}
+
+/* =======================================================================
+   スマホ向けレイアウト調整
+   ・盤面をできるだけ大きく、かつ操作ボタンと一緒に見えるようにする
+   ・指で押しやすいようにボタンの当たり判定を広げる
+   ・タイトル画面やダイアログが画面からはみ出さないようにする
+   ======================================================================= */
+
+@media (max-width: 700px) {
+  .app {
+    padding: calc(10px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right))
+             calc(20px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+    gap: 10px;
+  }
+
+  /* 上部のタイトル行は情報を詰めて、盤面に高さを譲る */
+  .topbar { gap: 6px 8px; }
+  .logo { font-size: 1.1rem; }
+
+  /* 盤面：横幅いっぱいに使いつつ、縦にも収まるよう高さでも上限をかける。
+     --vh は pwa.js が実際の表示領域から計算して入れている
+     （アドレスバーの分だけ 100vh がはみ出すのを避けるため）。 */
+  .board {
+    width: min(100%, calc(var(--vh, 1vh) * 58), 640px);
+    border-width: 2px;
+  }
+
+  /* 目標パネルと手数などの表示をコンパクトに */
+  .goal-panel { padding: 10px 12px; gap: 10px; }
+  .goal-desc { font-size: 0.9rem; }
+  .stat-group { gap: 10px; }
+  .stat-label { font-size: 0.62rem; }
+  .stat-value { font-size: 0.95rem; }
+  .status-line { font-size: 0.8rem; }
+
+  /* 操作ボタン：横に並べつつ、指で押しやすい高さを確保する */
+  .controls {
+    gap: 6px;
+    justify-content: center;
+  }
+  .controls .btn {
+    flex: 1 1 auto;
+    min-height: 44px;          /* 指で押しやすい最低サイズ */
+    padding: 10px 12px;
+    font-size: 0.8rem;
+  }
+  /* 主要な操作（回答・ギブアップ）は目立つように一行使う */
+  #btn-online-declare,
+  #btn-online-giveup,
+  #btn-switch-to-solo {
+    flex: 1 1 100%;
+  }
+
+  /* 遊び方は畳んでおき、開いた時だけ読ませる */
+  .how-to { font-size: 0.8rem; }
+}
+
+@media (max-width: 480px) {
+  .board { width: min(100%, calc(var(--vh, 1vh) * 55), 640px); }
+
+  .logo { font-size: 1.05rem; }
+  .goal-panel { padding: 9px 10px; }
+  .controls .btn { font-size: 0.76rem; padding: 10px 8px; }
+
+  /* ルーム設定やプロフィール編集などのダイアログを画面内に収める */
+  .title-card,
+  .profile-editor,
+  .result-screen-box,
+  .solo-suggest-box,
+  .solver-failed-box,
+  .next-ready-card {
+    width: min(96vw, 420px);
+    max-height: calc(var(--vh, 1vh) * 88);
+    overflow-y: auto;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  /* ルーム設定の選択肢は折り返して全部見えるように */
+  .room-setting-options { flex-wrap: wrap; }
+  .mini-option { min-height: 38px; }
+
+  /* オンラインHUDのプレイヤー表示を詰める */
+  .online-hud { gap: 6px; }
+  .online-hud-chip { font-size: 0.7rem; padding: 4px 7px; }
+
+  /* デカデカ表示が小さい画面でもはみ出さないように */
+  .race-flash-banner-text,
+  .clear-banner-text-inner { max-width: 94vw; }
+}
+
+/* 横向き（ランドスケープ）で高さが足りない時は、盤面を高さ基準に合わせる */
+@media (max-height: 560px) and (orientation: landscape) {
+  .app { padding-top: 8px; padding-bottom: 8px; gap: 8px; }
+  .board { width: min(100%, calc(var(--vh, 1vh) * 80), 640px); }
+  .how-to { display: none; }
 }
