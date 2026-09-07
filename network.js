@@ -634,19 +634,29 @@
         // アドレスのままなので、__hrAliasPeerId があればそちらを優先する。
         const targetId = conn.__hrAliasPeerId || conn.peer;
         const p = peers.get(targetId);
-        if (p) p.connected = false;
-        emitter.emit("peer-disconnected", targetId);
-        emitter.emit("peer-list-changed", peerListArray());
-        if (isHost()) {
-          broadcast({ type: "peer-left", peerId: targetId });
+        // 既に知らない相手（再接続で作り直されて消えた古いエントリや、
+        // 生存確認のような一時的な接続）については「切断された」と
+        // 触れ回らない。ここを無条件に通知していたため、スリープ復帰を
+        // 繰り返すうちに、存在しないプレイヤーの切断アナウンスが
+        // 出てしまっていた。
+        if (p) {
+          p.connected = false;
+          emitter.emit("peer-disconnected", targetId);
+          if (isHost()) {
+            broadcast({ type: "peer-left", peerId: targetId });
+          }
         }
+        emitter.emit("peer-list-changed", peerListArray());
         maybeMigrateHost();
       });
       conn.on("error", () => {
         const targetId = conn.__hrAliasPeerId || conn.peer;
         const p = peers.get(targetId);
-        if (p) p.connected = false;
-        emitter.emit("peer-disconnected", targetId);
+        // close と同じ理由で、知らない相手の切断は通知しない。
+        if (p) {
+          p.connected = false;
+          emitter.emit("peer-disconnected", targetId);
+        }
         emitter.emit("peer-list-changed", peerListArray());
         maybeMigrateHost();
       });

@@ -1717,7 +1717,11 @@
     const banner = document.getElementById("disconnect-banner");
     if (!banner || !mp) return;
     const p = mp.players.find((x) => x.peerId === peerId);
-    const name = p ? p.name || "プレイヤー" : "プレイヤー";
+    // この対戦に参加していない相手（再接続で作り直された古いIDなど）の
+    // 切断は知らせない。名前が引けないまま「プレイヤーさんが切断され
+    // ました」と出てしまい、存在しない人の切断アナウンスに見えるため。
+    if (!p) return;
+    const name = p.name || "プレイヤー";
     banner.innerHTML = `<div class="clear-banner-text"><span class="clear-banner-text-inner">${name}さんが<span class="clear-banner-sub">切断されました</span></span></div>`;
     banner.classList.remove("show");
     // eslint-disable-next-line no-unused-expressions
@@ -2123,6 +2127,7 @@
   window._HRMultiplayerDebug = {
     getState: () => mp,
     tickCountdownForTest: () => tickCountdown(),
+    showDisconnectBannerForTest: (peerId) => showDisconnectBanner(peerId),
     triggerEndMatchForTest: () => endMatch(),
   };
 })();

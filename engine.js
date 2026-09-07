@@ -352,6 +352,57 @@ function buildCandidateBoard() {
       if (implied.length > 0) corner.dirs = corner.dirs.concat(implied);
     });
 
+    // 外周（一番外側の行・列）にある「実際の壁」も、外枠そのものと
+    // 組み合わさってL字になる。これまでは「既に2辺そろっているコーナー」
+    // に外枠の向きを補うだけだったため、単独の壁が外枠と作るL字
+    // （例：一番左の列にある横壁＋左の外枠＝「└」）がチェック対象から
+    // 丸ごと漏れていた。これが「外周と接するL字が認識されない」問題の
+    // 正体なので、実際の壁データを直接見て拾い直す。
+    const PERPENDICULAR = { N: ["W", "E"], S: ["W", "E"], W: ["N", "S"], E: ["N", "S"] };
+    function realWallDirsAt(r, c) {
+      const d = [];
+      if (hWalls.has(`${r},${c}`)) d.push("N");
+      if (hWalls.has(`${r + 1},${c}`)) d.push("S");
+      if (vWalls.has(`${r},${c}`)) d.push("W");
+      if (vWalls.has(`${r},${c + 1}`)) d.push("E");
+      return d;
+    }
+    const cornerByCell = new Map();
+    lCorners.forEach((k) => cornerByCell.set(`${k.r},${k.c}`, k));
+    for (let r = 0; r <= 15; r++) {
+      for (let c = 0; c <= 15; c++) {
+        if (!(r === 0 || r === 15 || c === 0 || c === 15)) continue;
+        if (blocked.has(`${r},${c}`)) continue;
+        const edgeDirs = [];
+        if (r === 0) edgeDirs.push("N");
+        if (r === 15) edgeDirs.push("S");
+        if (c === 0) edgeDirs.push("W");
+        if (c === 15) edgeDirs.push("E");
+        const realDirs = realWallDirsAt(r, c);
+        // 外枠と垂直に交わる実際の壁があってはじめてL字になる
+        const perp = realDirs.filter((d) => edgeDirs.some((e) => PERPENDICULAR[e].includes(d)));
+        if (perp.length === 0) continue;
+        const key = `${r},${c}`;
+        const existing = cornerByCell.get(key);
+        if (existing) {
+          existing.dirs = Array.from(new Set(existing.dirs.concat(perp, edgeDirs)));
+        } else {
+          const added = { r, c, dirs: Array.from(new Set(perp.concat(edgeDirs))), source: { type: "edge" } };
+          lCorners.push(added);
+          cornerByCell.set(key, added);
+        }
+      }
+    }
+
+    // 各コーナーについて「実際に壁があるのはどの向きか」を記録しておく。
+    // 外枠や暗黙の辺は含めない。コの字／冠／受け皿の判定では、2つのL字を
+    // つなぐ“横棒”が実際の壁である場合だけを違反とするために使う。
+    // （横棒が盤面の外枠そのものである場合は、単に外枠にトゲが並んで
+    //  生えているだけで、向かい合ったL字ではないため違反ではない。
+    //  ここを区別しないと、外周のノッチ同士が軒並み違反扱いになり、
+    //  盤面が事実上生成できなくなる。）
+    lCorners.forEach((k) => { k.realDirs = realWallDirsAt(k.r, k.c); });
+
     // 中央コア（2x2）に隣接するL字コーナーも同様（コア自身の実際の壁
     // データと同じ意味になるため、方向の入れ替えは不要）。
     const CORE_ADJACENT_IMPLIED = {
@@ -455,6 +506,12 @@ function buildCandidateBoard() {
 // リスト（{ r, c, dirs: [dir, dir] } の配列）。単一の壁を隣のマスから見た
 // ときの「もう片側」のような、意図しない組み合わせを誤検出しないよう、
 // 生の壁データを再スキャンするのではなくこのリストを直接使う。
+// 2つのL字をつなぐ“横棒”が、実際の壁かどうか。realDirs が無い
+// （テスト用に手で組んだデータなど）場合は、従来どおり実壁として扱う。
+function isRealDir(corner, dir) {
+  return !corner.realDirs || corner.realDirs.includes(dir);
+}
+
 function findFirstColumnViolation(lCorners) {
   const byCol = new Map();
   lCorners.forEach((corner) => {
@@ -470,7 +527,7 @@ function findFirstColumnViolation(lCorners) {
         const bottom = list[i].r < list[j].r ? list[j] : list[i];
         if (top.r === bottom.r) continue;
         if (!top.dirs.includes("N") || !bottom.dirs.includes("S")) continue;
-        const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d));
+        const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d) && isRealDir(top, d) && isRealDir(bottom, d));
         if (hDir) {
           return { shape: hDir === "E" ? "コ" : "C", axis: "col", c, a: top, b: bottom };
         }
@@ -495,7 +552,7 @@ function findFirstRowViolation(lCorners) {
         const right = list[i].c < list[j].c ? list[j] : list[i];
         if (left.c === right.c) continue;
         if (!left.dirs.includes("W") || !right.dirs.includes("E")) continue;
-        const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d));
+        const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d) && isRealDir(left, d) && isRealDir(right, d));
         if (vDir) {
           return { shape: vDir === "N" ? "冠" : "受け皿", axis: "row", r, a: left, b: right };
         }
@@ -523,7 +580,7 @@ function findAxisShapeViolations(lCorners) {
         const right = list[i].c < list[j].c ? list[j] : list[i];
         if (left.c === right.c) continue;
         if (!left.dirs.includes("W") || !right.dirs.includes("E")) continue;
-        const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d));
+        const vDir = ["N", "S"].find((d) => left.dirs.includes(d) && right.dirs.includes(d) && isRealDir(left, d) && isRealDir(right, d));
         if (vDir) {
           violations.push({
             shape: vDir === "N" ? "冠" : "受け皿",
@@ -546,7 +603,7 @@ function findAxisShapeViolations(lCorners) {
         const bottom = list[i].r < list[j].r ? list[j] : list[i];
         if (top.r === bottom.r) continue;
         if (!top.dirs.includes("N") || !bottom.dirs.includes("S")) continue;
-        const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d));
+        const hDir = ["E", "W"].find((d) => top.dirs.includes(d) && bottom.dirs.includes(d) && isRealDir(top, d) && isRealDir(bottom, d));
         if (hDir) {
           violations.push({
             shape: hDir === "E" ? "コ" : "C",
