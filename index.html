@@ -271,6 +271,7 @@
       <span class="mode-badge" id="diagonal-mode-badge" style="display:none;">斜め壁あり</span>
       <span class="mode-badge" id="cleared-badge">クリア: 0</span>
       <span class="mode-badge hidden" id="room-id-badge"></span>
+      <button id="btn-how-to" class="btn">📖 遊び方・ルール</button>
       <button id="btn-back-title" class="btn">🏠 タイトルへ戻る</button>
       <button id="btn-new-map" class="btn">🔀 新しいマップ</button>
     </header>
@@ -344,8 +345,35 @@
       <div class="board" id="board"></div>
     </div>
 
-    <details class="how-to">
-      <summary>遊び方・ルール</summary>
+    <!-- スマホ用の操作パネル。盤面の下に、左側に補助ボタン＋ロボット選択、
+         右側に方向キーを置く。PC では CSS で非表示にしている。 -->
+    <div class="touch-deck" id="touch-deck">
+      <div class="touch-deck-left">
+        <div class="touch-deck-row">
+          <button type="button" class="touch-btn" id="td-undo" aria-label="一個戻る">↶</button>
+          <button type="button" class="touch-btn" id="td-redo" aria-label="一個進む">↷</button>
+          <button type="button" class="touch-btn" id="td-reset" aria-label="リセット">⟲</button>
+        </div>
+        <div class="touch-deck-row touch-robot-row" id="td-robot-row">
+          <button type="button" class="touch-robot" data-robot="0" aria-label="1番目のロボットを選択"></button>
+          <button type="button" class="touch-robot" data-robot="1" aria-label="2番目のロボットを選択"></button>
+          <button type="button" class="touch-robot" data-robot="2" aria-label="3番目のロボットを選択"></button>
+          <button type="button" class="touch-robot" data-robot="3" aria-label="4番目のロボットを選択"></button>
+          <button type="button" class="touch-robot" data-robot="4" aria-label="5番目のロボットを選択"></button>
+        </div>
+      </div>
+      <div class="touch-dpad" id="touch-dpad">
+        <button type="button" class="dpad-btn dpad-n" data-dir="N" aria-label="上へ移動">▲</button>
+        <button type="button" class="dpad-btn dpad-w" data-dir="W" aria-label="左へ移動">◀</button>
+        <button type="button" class="dpad-btn dpad-e" data-dir="E" aria-label="右へ移動">▶</button>
+        <button type="button" class="dpad-btn dpad-s" data-dir="S" aria-label="下へ移動">▼</button>
+      </div>
+    </div>
+
+    <div class="how-to-overlay hidden" id="how-to-overlay">
+      <div class="how-to-box">
+        <button type="button" class="how-to-close" id="btn-how-to-close" aria-label="閉じる">×</button>
+        <h2 class="how-to-title">遊び方・ルール</h2>
       <div class="how-to-body">
         <p><strong>移動のルール</strong><br>
         ロボットは縦・横のまっすぐな方向にしか動けません。しかも、壁や他のロボットにぶつかるまで止まることができず、途中で曲がることもできません。ロボットをクリックすると選択され、進める方向に矢印が表示されます。矢印をクリックすると、止まる場所までスライドします。</p>
@@ -360,7 +388,8 @@
         <p><strong>斜め壁（任意設定）</strong><br>
         タイトル画面で「斜め壁を追加する」を選ぶと、盤面のところどころに色つきの斜めの壁が現れます。自分と同じ色の斜め壁はすり抜けられますが、違う色の斜め壁にぶつかると、その場で90度向きが変わってそのまま直進します（曲がるところまでで1手です）。</p>
       </div>
-    </details>
+      </div>
+    </div>
   </div>
 
   <script src="boards.js"></script>

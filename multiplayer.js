@@ -1016,6 +1016,20 @@
       clearInterval(mp.countdownInterval);
       mp.countdownInterval = null;
     }
+    // 大きなカウントダウン表示は renderCountdownDisplays()（＝毎秒の
+    // tick）でしか更新されないので、tick が止まるここで必ず消す。
+    // これをしないと「準備確認なし」設定のように tick を経ずに次の
+    // お題へ進む場合、表示が出たまま残ってしまう。
+    hideBigCountdown();
+  }
+
+  function hideBigCountdown() {
+    const el = document.getElementById("big-countdown-display");
+    if (el) el.classList.add("hidden");
+    // flash-hidden（デカデカ表示中の一時的な透明化）はここでは触らない。
+    // 宣言直後は showRaceFlashBanner が付けた直後に startCountdown →
+    // stopCountdown と流れるため、ここで消すと透明化が即解除されてしまう。
+    // flash-hidden は showRaceFlashBanner 側のタイマーが外す。
   }
 
   function requestVerification() {
@@ -2122,6 +2136,33 @@
       renderNextReadyPlayerList();
     }
     checkAloneStatus();
+  };
+
+  // スマホ用の操作パネル（盤面下の方向キー・ロボット選択）から、
+  // オンライン対戦の操作を呼べるようにするための橋渡し。
+  window.__HRTouchOnline = {
+    getState: () => ({
+      colors: mp ? mp.colors : [],
+      robots: mp ? mp.robots : [],
+      board: mp ? mp.board : null,
+      selected: mp ? mp.selectedRobot : null,
+      locked: !mp || mp.locked || mp.matchOver,
+    }),
+    selectRobot: (idx) => {
+      if (!mp || mp.locked || mp.matchOver) return;
+      if (idx >= mp.colors.length) return;
+      onRobotClick(idx);
+      if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
+    },
+    move: (dir) => {
+      if (!mp || mp.locked || mp.matchOver || mp.selectedRobot === null) return;
+      if (!window.canMoveAtAll(mp.board, mp.robots, mp.selectedRobot, dir, mp.colors[mp.selectedRobot])) return;
+      performUserMove(mp.selectedRobot, dir);
+      if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
+    },
+    undo: () => { undo(); if (typeof window.syncTouchDeck === "function") window.syncTouchDeck(); },
+    redo: () => { redo(); if (typeof window.syncTouchDeck === "function") window.syncTouchDeck(); },
+    reset: () => { resetToRoundStart(); if (typeof window.syncTouchDeck === "function") window.syncTouchDeck(); },
   };
 
   window._HRMultiplayerDebug = {

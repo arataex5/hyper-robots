@@ -252,10 +252,12 @@
   function clearArrows() {
     arrowEls.forEach((el) => el.remove());
     arrowEls = [];
+    if (typeof window.syncTouchDeck === "function") setTimeout(window.syncTouchDeck, 0);
   }
 
   function showArrowsForRobot(idx) {
     clearArrows();
+    if (typeof window.syncTouchDeck === "function") setTimeout(window.syncTouchDeck, 0);
     const pos = robots[idx];
     ["N", "S", "E", "W"].forEach((dir) => {
       if (!canMoveAtAll(board, robots, idx, dir, ACTIVE_COLORS[idx])) return;
@@ -907,6 +909,95 @@
       window.dispatchEvent(new CustomEvent("hr-return-to-title"));
     });
   }
+  // ---------- 遊び方モーダル ----------
+  const howToOverlay = document.getElementById("how-to-overlay");
+  const btnHowTo = document.getElementById("btn-how-to");
+  const btnHowToClose = document.getElementById("btn-how-to-close");
+  if (btnHowTo && howToOverlay) {
+    btnHowTo.addEventListener("click", () => howToOverlay.classList.remove("hidden"));
+  }
+  if (btnHowToClose && howToOverlay) {
+    btnHowToClose.addEventListener("click", () => howToOverlay.classList.add("hidden"));
+  }
+  if (howToOverlay) {
+    howToOverlay.addEventListener("click", (e) => {
+      if (e.target === howToOverlay) howToOverlay.classList.add("hidden");
+    });
+  }
+
+  // ---------- スマホ用の操作パネル ----------
+  // 盤面の下に置く方向キーとロボット選択ボタン。オンライン対戦でも同じ
+  // 部品を使うため、実際の操作は「今アクティブなモード」に委譲する。
+  // window.__HR_ONLINE_ACTIVE が true ならオンライン側のハンドラを呼ぶ。
+  function deckOnline() {
+    return window.__HR_ONLINE_ACTIVE && window.__HRTouchOnline ? window.__HRTouchOnline : null;
+  }
+  function deckSelectRobot(idx) {
+    const o = deckOnline();
+    if (o) { o.selectRobot(idx); return; }
+    if (locked || gameOver) return;
+    if (idx >= ACTIVE_COLORS.length) return;
+    onRobotClick(idx);
+    syncTouchDeck();
+  }
+  function deckMove(dir) {
+    const o = deckOnline();
+    if (o) { o.move(dir); return; }
+    if (locked || gameOver || selectedRobot === null) return;
+    if (!canMoveAtAll(board, robots, selectedRobot, dir, ACTIVE_COLORS[selectedRobot])) return;
+    performUserMove(selectedRobot, dir);
+    syncTouchDeck();
+  }
+
+  // 方向キーの有効／無効と、ロボット選択ボタンの見た目を今の状態に合わせる。
+  window.syncTouchDeck = function syncTouchDeck() {
+    const o = deckOnline();
+    const st = o
+      ? o.getState()
+      : { colors: ACTIVE_COLORS, robots, board, selected: selectedRobot, locked: locked || gameOver };
+
+    document.querySelectorAll(".touch-robot").forEach((btn) => {
+      const i = Number(btn.dataset.robot);
+      const active = i < st.colors.length;
+      btn.classList.toggle("hidden", !active);
+      if (!active) return;
+      btn.style.background = `var(--c-${st.colors[i]})`;
+      btn.classList.toggle("selected", st.selected === i);
+      btn.disabled = !!st.locked;
+    });
+
+    document.querySelectorAll(".dpad-btn").forEach((btn) => {
+      const dir = btn.dataset.dir;
+      let ok = false;
+      if (!st.locked && st.selected !== null && st.selected < st.colors.length) {
+        ok = canMoveAtAll(st.board, st.robots, st.selected, dir, st.colors[st.selected]);
+      }
+      btn.disabled = !ok;
+      btn.classList.toggle("enabled", ok);
+    });
+  };
+  const syncTouchDeck = window.syncTouchDeck;
+
+  document.querySelectorAll(".touch-robot").forEach((btn) => {
+    btn.addEventListener("click", () => deckSelectRobot(Number(btn.dataset.robot)));
+  });
+  document.querySelectorAll(".dpad-btn").forEach((btn) => {
+    btn.addEventListener("click", () => deckMove(btn.dataset.dir));
+  });
+  const tdMap = { "td-undo": "undo", "td-redo": "redo", "td-reset": "reset" };
+  Object.keys(tdMap).forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      const o = deckOnline();
+      if (o) { o[tdMap[id]](); return; }
+      if (tdMap[id] === "undo") undoMove();
+      else if (tdMap[id] === "redo") redoMove();
+      else resetRound();
+      syncTouchDeck();
+    });
+  });
+
   btnUndo.addEventListener("click", undoMove);
   btnRedo.addEventListener("click", redoMove);
   btnReset.addEventListener("click", resetRound);
@@ -951,6 +1042,13 @@
     if (roomIdBadge) roomIdBadge.classList.add("hidden");
     const playerBadge = document.getElementById("player-badge");
     if (playerBadge) playerBadge.classList.add("hidden");
+    // オンライン対戦から抜けてきた場合、勝敗判定カウントダウンが
+    // 出たままになることがあるので必ず消す。
+    const bigCountdown = document.getElementById("big-countdown-display");
+    if (bigCountdown) {
+      bigCountdown.classList.add("hidden");
+      bigCountdown.classList.remove("flash-hidden");
+    }
 
     ACTIVE_COLORS = mode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
     USE_DIAGONALS = !!useDiagonals;

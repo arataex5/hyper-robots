@@ -2059,3 +2059,201 @@ body.title-active { overflow: hidden; }
   .board { width: min(100%, calc(var(--vh, 1vh) * 80), 640px); }
   .how-to { display: none; }
 }
+
+/* ---------- 遊び方モーダル（ボタン式） ---------- */
+.how-to-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 924;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 18, 0.72);
+  padding: 16px;
+}
+.how-to-overlay.hidden { display: none; }
+.how-to-box {
+  position: relative;
+  width: min(94vw, 560px);
+  max-height: calc(var(--vh, 1vh) * 86);
+  overflow-y: auto;
+  padding: 22px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 30px 70px -25px rgba(0,0,0,0.7);
+}
+.how-to-title {
+  margin: 0 0 12px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.1rem;
+  color: var(--text);
+}
+.how-to-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.how-to-close:hover { color: var(--text); }
+
+/* ---------- スマホ用 操作パネル（既定は非表示。スマホ幅でのみ出す） ---------- */
+.touch-deck { display: none; }
+
+@media (max-width: 700px) {
+  .touch-deck {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 2px;
+  }
+  .touch-deck-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .touch-deck-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .touch-btn {
+    flex: 1 1 0;
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 1.1rem;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-btn);
+    cursor: pointer;
+  }
+  .touch-btn:active { transform: translateY(1px); }
+  .touch-btn:disabled { opacity: 0.38; }
+
+  /* ロボット選択（5色分の枠を確保。4色モードでは5個目を隠す） */
+  .touch-robot {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    border-radius: 12px;
+    border: 2px solid rgba(0,0,0,0.55);
+    cursor: pointer;
+    position: relative;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.22);
+  }
+  .touch-robot.hidden { display: none; }
+  .touch-robot::before,
+  .touch-robot::after {
+    /* ロボットの目 */
+    content: "";
+    position: absolute;
+    top: 34%;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: inset 0 0 0 2px #1a1e2c;
+  }
+  .touch-robot::before { left: 22%; }
+  .touch-robot::after { right: 22%; }
+  .touch-robot.selected {
+    outline: 3px solid #ffffff;
+    outline-offset: 1px;
+  }
+  .touch-robot:disabled { opacity: 0.4; }
+
+  /* 方向キー（盤面の下・右側、少し大きめ） */
+  .touch-dpad {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(3, 52px);
+    grid-template-rows: repeat(3, 52px);
+    gap: 4px;
+  }
+  .dpad-btn {
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: #6b7590;
+    font-size: 1.35rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+  }
+  /* 有効な方向は赤、無効な方向はグレーアウト */
+  .dpad-btn.enabled {
+    background: var(--c-red);
+    border-color: #b23a28;
+    color: #fff;
+  }
+  .dpad-btn:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+  .dpad-btn:active:not(:disabled) { transform: translateY(1px); }
+  .dpad-n { grid-column: 2; grid-row: 1; }
+  .dpad-w { grid-column: 1; grid-row: 2; }
+  .dpad-e { grid-column: 3; grid-row: 2; }
+  .dpad-s { grid-column: 2; grid-row: 3; }
+
+  /* 操作パネルを置いた分、盤面の高さ上限を少し下げる */
+  .board { width: min(100%, calc(var(--vh, 1vh) * 48), 640px); }
+
+  /* 盤面上の矢印はスマホでは方向キーに任せる（指で隠れるため） */
+  .move-arrow { display: none; }
+
+  /* 答え合わせ・次の問題へ は操作パネルの下に横並びで */
+  #solo-controls .btn { flex: 1 1 40%; }
+}
+
+@media (max-width: 480px) {
+  .board { width: min(100%, calc(var(--vh, 1vh) * 45), 640px); }
+  .touch-dpad { grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); }
+  .touch-robot { width: 40px; height: 40px; }
+  .touch-btn { min-width: 40px; min-height: 42px; font-size: 1rem; }
+}
+
+/* ---------- スマホ：ルーム作成／設定画面まわりの調整 ---------- */
+@media (max-width: 700px) {
+  /* 右端に余白ができて横スクロールが出るのを防ぐ */
+  html, body { max-width: 100%; overflow-x: hidden; }
+  .title-screen { padding-left: 8px; padding-right: 8px; }
+  .title-card,
+  .room-panel,
+  .room-settings {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* ルームID と 色数などのバッジの間隔を詰める */
+  .topbar { gap: 4px 6px; }
+  .mode-badge { padding: 3px 7px; font-size: 0.66rem; }
+  #room-id-badge { margin-right: 0; }
+  .room-id-display { gap: 6px; margin-bottom: 10px; }
+
+  /* ？ボタンの説明が画面外にはみ出さないようにする。
+     左寄せ固定だと右端の？で切れてしまうため、右端に寄せ直す。 */
+  .setting-help::after {
+    width: min(240px, 74vw);
+    max-width: 74vw;
+    left: auto;
+    right: 0;
+  }
+  /* 行の左側にある？は、逆に左基準の方が収まりが良い */
+  .room-setting-label-row .setting-help:first-of-type::after {
+    left: 0;
+    right: auto;
+  }
+}
