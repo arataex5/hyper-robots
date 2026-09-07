@@ -1288,6 +1288,29 @@
     return false;
   }
 
+  // ホストのみ: 切断などで顔ぶれが変わった時、そのまま待ち続ける意味が
+  // 無くなっていないかを見直す。
+  // ギブアップ待ち（チャンピオン不在）の最中に、まだギブアップしていない
+  // プレイヤーが接続断すると、残っているのは全員ギブアップ済みの人だけに
+  // なる。そのまま60秒待たせても結果は変わらないので、すぐ答え合わせ
+  // （＝引き分け）に進める。
+  function maybeResolveAfterRosterChange() {
+    if (!mp || !mp.isHost || mp.matchOver || !mp.currentGoal) return;
+    if (mp.bestDeclare) {
+      // チャンピオンがいる場合は、降参していない人が抜けたことで
+      // 「チャンピオン以外は全員降参済み」になっていないかを見る。
+      maybeResolveIfAllOthersAlreadyConceded();
+      return;
+    }
+    if (mp.countdownKind !== "giveup") return;
+    const active = activePeerIds();
+    if (active.length === 0) return;
+    if (active.every((id) => mp.giveUpVoters.has(id))) {
+      stopCountdown();
+      revealGiveUpAnswer();
+    }
+  }
+
   function applyGiveUpVote(msg) {
     if (!mp.isHost) return;
     mp.giveUpVoters.add(msg.peerId);
@@ -2026,6 +2049,7 @@
         renderNextReadyPlayerList();
       }
       checkAloneStatus();
+      maybeResolveAfterRosterChange();
     });
   }
 

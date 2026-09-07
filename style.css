@@ -2257,3 +2257,23 @@ body.title-active { overflow: hidden; }
     right: auto;
   }
 }
+
+/* ---------- スマホ：盤面上部の操作ボタンを整理 ---------- */
+@media (max-width: 700px) {
+  /* 一個戻る／一個進む／リセットは盤面下の操作パネルに移したので、
+     盤面上部からは消す（同じ機能が2か所にあると紛らわしいため）。 */
+  #btn-undo, #btn-redo, #btn-reset,
+  #btn-online-undo, #btn-online-redo, #btn-online-reset {
+    display: none;
+  }
+
+  /* 残った操作ボタン（答え合わせ／次の問題へ、回答する／ギブアップ）は
+     盤面と方向キーの下へ。指の届く位置にまとめる。
+     .app は縦並びの flex なので order で並び替えられる。 */
+  .topbar      { order: 1; }
+  .goal-panel  { order: 2; }
+  .status-line { order: 3; }
+  .board-wrap  { order: 4; }
+  .touch-deck  { order: 5; }
+  .controls    { order: 6; }
+}
