@@ -382,6 +382,10 @@
     function step() {
       if (i >= waypoints.length) {
         mp.locked = false;
+        // スマホの操作パネルは、移動開始時（ロック中）にしか更新されない
+        // ため、ロック解除のタイミングでも必ず更新し直す。これをしないと
+        // 1回動かしたあと方向キーがグレーアウトしたままになる。
+        if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
         if (onDone) onDone();
         return;
       }
@@ -1326,6 +1330,14 @@
       maybeResolveIfAllOthersAlreadyConceded();
     } else if (mp.countdownKind === null) {
       applyGiveUpStart(msg);
+      // これで「今つながっている全員がギブアップ済み」になった場合
+      // （例：他の人が抜けて自分ひとりになった後に押した場合）は、
+      // 60秒待っても結果は変わらないので今すぐ答え合わせにする。
+      const activeNow = activePeerIds();
+      if (activeNow.length > 0 && activeNow.every((id) => mp.giveUpVoters.has(id))) {
+        stopCountdown();
+        revealGiveUpAnswer();
+      }
     } else if (mp.countdownKind === "giveup") {
       // 既にギブアップ待ち中に、別の人がさらにギブアップを押した場合。
       // 全員分がそろったら、60秒を待たずに今すぐ答えを見せる。

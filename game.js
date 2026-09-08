@@ -355,6 +355,7 @@
     setPercentPos(robotEls[idx], to.r, to.c);
     setTimeout(() => {
       locked = false;
+      if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
       if (onDone) onDone();
     }, MOVE_ANIM_MS);
   }
@@ -368,6 +369,7 @@
     const step = () => {
       if (i >= waypoints.length) {
         locked = false;
+        if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
         if (onDone) onDone();
         return;
       }
@@ -451,6 +453,7 @@
       locked = false;
       updateMoveCount();
       updateUndoRedoButtons();
+      if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
     }, MOVE_ANIM_MS);
   }
 

@@ -2026,7 +2026,9 @@ body.title-active { overflow: hidden; }
     justify-content: flex-start;
   }
   .controls .btn {
-    flex: 0 1 auto;
+    /* 横並びのボタンは同じ幅に揃える */
+    flex: 1 1 0;
+    min-width: 0;
   }
   #btn-switch-to-solo {
     flex: 1 1 100%;
@@ -2127,7 +2129,10 @@ body.title-active { overflow: hidden; }
 @media (max-width: 700px) {
   .touch-deck {
     display: flex;
-    align-items: flex-end;
+    /* 左側のボタン群を盤面の真下から始める。flex-end のままだと、
+       背の高い方向キーの下端に合わせて下がってしまい、盤面との間に
+       大きな空白ができてしまう。 */
+    align-items: flex-start;
     justify-content: space-between;
     gap: 10px;
     margin-top: 2px;
@@ -2258,17 +2263,19 @@ body.title-active { overflow: hidden; }
   .room-id-display { gap: 6px; margin-bottom: 10px; }
 
   /* ？ボタンの説明が画面外にはみ出さないようにする。
-     左寄せ固定だと右端の？で切れてしまうため、右端に寄せ直す。 */
-  .setting-help::after {
-    width: min(240px, 74vw);
-    max-width: 74vw;
-    left: auto;
-    right: 0;
-  }
-  /* 行の左側にある？は、逆に左基準の方が収まりが良い */
-  .room-setting-label-row .setting-help:first-of-type::after {
+     アイコンを基準に左右どちらへ伸ばしても、アイコンの位置次第で
+     画面外へ出てしまう。そこで、吹き出しの基準をアイコンではなく
+     「設定項目の行」に変え、パネルの幅いっぱいに広げて必ず収める。
+     （.setting-help の position を static にすることで、
+       ::after の基準が親の .room-setting-label-row になる） */
+  .room-setting-label-row { position: relative; }
+  .room-setting-label-row .setting-help { position: static; }
+  .room-setting-label-row .setting-help::after {
     left: 0;
-    right: auto;
+    right: 0;
+    width: auto;
+    max-width: none;
+    bottom: calc(100% + 8px);
   }
 }
 
@@ -2285,11 +2292,12 @@ body.title-active { overflow: hidden; }
      盤面と方向キーの下へ。指の届く位置にまとめる。
      .app は縦並びの flex なので order で並び替えられる。 */
   .topbar      { order: 1; }
-  .goal-panel  { order: 2; }
-  .status-line { order: 3; }
-  .board-wrap  { order: 4; }
-  .touch-deck  { order: 5; }
-  .controls    { order: 6; }
+  .online-hud  { order: 2; }   /* プレイヤー一覧は上部ボタンの下・目標の上 */
+  .goal-panel  { order: 3; }
+  .status-line { order: 4; }
+  .board-wrap  { order: 5; }
+  .touch-deck  { order: 6; }
+  .controls    { order: 7; }
 }
 
 /* ---------- スマホ：盤面と操作パネルの間隔を詰める ---------- */
