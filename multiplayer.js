@@ -804,6 +804,8 @@
     }
     showGoalRevealBanner(goal, desc);
     setStatus("新しい目標が現れました。ロボットを動かしてゴールしたら「回答する」で宣言しましょう。");
+    // 次の目標に切り替わった時も、操作ボタンが見えるページ下部から始める。
+    if (typeof window.scrollBoardIntoView === "function") window.scrollBoardIntoView();
     renderHud();
     renderRaceStatus();
     refreshGiveUpButtonState();
@@ -1247,6 +1249,21 @@
     btn.disabled = !!iAmChampion || mp.myGiveUpVoted;
   }
 
+  function askGiveUpConfirm() {
+    // ボタンが押せない状況（既にギブアップ済み・自分がチャンピオン等）では
+    // 確認も出さない。判定は giveUp() と同じ条件にそろえる。
+    if (!mp || !mp.currentGoal || mp.myGiveUpVoted || mp.matchOver) return;
+    if (mp.bestDeclare && mp.bestDeclare.peerId === mp.myPeerId) return;
+    const el = document.getElementById("giveup-confirm-overlay");
+    if (!el) { giveUp(); return; }
+    el.classList.remove("hidden");
+  }
+
+  function closeGiveUpConfirm() {
+    const el = document.getElementById("giveup-confirm-overlay");
+    if (el) el.classList.add("hidden");
+  }
+
   function giveUp() {
     if (!mp.currentGoal || mp.myGiveUpVoted || mp.matchOver) return;
     // チャンピオン自身は「自分に降参する」ことはできない
@@ -1298,6 +1315,25 @@
   // プレイヤーが接続断すると、残っているのは全員ギブアップ済みの人だけに
   // なる。そのまま60秒待たせても結果は変わらないので、すぐ答え合わせ
   // （＝引き分け）に進める。
+  // ホストが抜けて自分が新ホストになった時、進行中のカウントダウンの
+  // 「時間切れ処理」を引き継ぐ。ゲスト側は表示専用のカウントダウン
+  // （時間切れで何もしない）を動かしているだけなので、これをしないと
+  // 60秒経っても何も起こらないまま止まってしまう。
+  // 期限そのものは元のまま（残り時間から逆算）にして、引き継ぎで
+  // 時間が延びないようにする。
+  function adoptCountdownAsNewHost() {
+    if (!mp || !mp.isHost || mp.matchOver || !mp.currentGoal) return;
+    if (mp.countdownKind !== "giveup" && mp.countdownKind !== "declare") return;
+    const remainMs = mp.countdownEndTime - Date.now();
+    const onExpire = mp.countdownKind === "declare" ? requestVerification : revealGiveUpAnswer;
+    if (remainMs <= 0) {
+      stopCountdown();
+      onExpire();
+      return;
+    }
+    startCountdown(Math.ceil(remainMs / 1000), onExpire);
+  }
+
   function maybeResolveAfterRosterChange() {
     if (!mp || !mp.isHost || mp.matchOver || !mp.currentGoal) return;
     if (mp.bestDeclare) {
@@ -2025,7 +2061,13 @@
     document.getElementById("btn-online-redo").addEventListener("click", redo);
     document.getElementById("btn-online-reset").addEventListener("click", resetToRoundStart);
     document.getElementById("btn-online-declare").addEventListener("click", declare);
-    document.getElementById("btn-online-giveup").addEventListener("click", giveUp);
+    // ギブアップは取り消せないので、押した時は確認を挟む。
+    document.getElementById("btn-online-giveup").addEventListener("click", askGiveUpConfirm);
+    document.getElementById("btn-giveup-no").addEventListener("click", closeGiveUpConfirm);
+    document.getElementById("btn-giveup-yes").addEventListener("click", () => {
+      closeGiveUpConfirm();
+      giveUp();
+    });
     document.getElementById("btn-online-next-ready").addEventListener("click", nextRoundReady);
     document.getElementById("btn-watch-champion-replay").addEventListener("click", watchChampionReplay);
     document.getElementById("btn-switch-to-solo").addEventListener("click", switchToSoloMode);
@@ -2048,6 +2090,12 @@
         mp.isHost = window.HRNet.isHost();
         showHostChangedBanner(oldHostPeerId, newHostPeerId);
         renderHud();
+        // 新ホストになった時点で、進行中のカウントダウンの責任を引き継ぎ、
+        // さらに「もう待つ意味がない状態」になっていないかを見直す。
+        // peer-list-changed が先に来た時点では、まだ自分はホストでは
+        // なかったため判定が空振りしている可能性がある。
+        adoptCountdownAsNewHost();
+        maybeResolveAfterRosterChange();
       }
       lastKnownHostPeerId = newHostPeerId;
     });

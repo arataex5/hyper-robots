@@ -43,6 +43,8 @@ body {
   -webkit-tap-highlight-color: transparent;
   /* 画面端で引っ張った時に、ページ全体がゴムのように動くのを抑える */
   overscroll-behavior-y: none;
+  /* ※ body の指定が画面全体に効くのは html 側が overflow: visible の
+       時だけ。下の html への指定が実際の「引っ張って更新」の抑止。 */
   /* 横方向にはみ出して横スクロールが出るのを防ぐ */
   overflow-x: hidden;
 }
@@ -2317,4 +2319,61 @@ body.title-active { overflow: hidden; }
   .topbar-actions .btn:last-child { border-top-right-radius: var(--radius-btn); border-bottom-right-radius: var(--radius-btn); }
   /* 隣り合う境界線が二重に見えないように重ねる */
   .topbar-actions .btn + .btn { margin-left: -1px; }
+}
+
+/* ---------- スマホ：レイアウトの揺れを止める ---------- */
+@media (max-width: 700px) {
+  /* 状況メッセージは内容によって1行になったり2行になったりする。
+     ページ下端まで表示している状態で行数が変わると、ページ全体の高さが
+     変わり、その分だけ画面がカクッと動いて見える。
+     （「〇〇さんがギブアップしました」や次の目標のお知らせの時に発生）
+     常に2行分の高さを確保して、行数が変わっても高さが動かないようにする。 */
+  .status-line {
+    min-height: 3.1em;
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+}
+
+/* ---------- スマホ：操作ボタンを方向キーの左側へ引き上げる ---------- */
+@media (max-width: 700px) {
+  :root {
+    --dpad-cell: 52px;
+    --dpad-gap: 4px;
+    --dpad-size: calc(var(--dpad-cell) * 3 + var(--dpad-gap) * 2);
+    --deck-left-h: 96px;   /* 補助ボタン44 + すき間8 + ロボット選択44 */
+    --deck-col-gap: 10px;
+  }
+  /* 方向キーは3段ぶんの高さがあるので、左側の列（補助ボタン＋ロボット
+     選択）との間に大きな空白ができてしまう。その空白ぶんだけ操作ボタンを
+     引き上げ、方向キーの左どなりに収まるよう幅も制限する。 */
+  .controls {
+    margin-top: calc(-1 * (var(--dpad-size) - var(--deck-left-h)) - 10px);
+    width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
+    max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --dpad-cell: 46px;
+    --deck-left-h: 90px;   /* 補助ボタン42 + すき間8 + ロボット選択40 */
+  }
+}
+
+/* 上端で引っ張った時の「引っ張って更新（pull-to-refresh）」を無効にする。
+   ゲーム中に誤って更新されるとタイトル画面まで戻ってしまうため。
+   body ではなく html（実際にスクロールする要素）に指定する必要がある。
+   ※ Chrome / Edge / Android 系で有効。iOS Safari は現状この指定に
+     対応していないため、Safari では従来どおりの動作になる。 */
+html {
+  overscroll-behavior-y: none;
+}
+
+/* ギブアップ確認ダイアログの [いいえ][はい] は横並びに */
+.giveup-confirm-actions {
+  flex-direction: row;
+}
+.giveup-confirm-actions .btn {
+  flex: 1 1 0;
 }

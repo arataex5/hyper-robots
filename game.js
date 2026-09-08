@@ -50,7 +50,9 @@
   let selectedRobot = null;
   let locked = false; // true while an animation is in-flight
 
-  let roundState = { cleared: false, answerRevealed: false };
+  // cleared: 今この瞬間ゴール状態か（元に戻すで解除される表示用の状態）
+  // counted: この目標で既にクリア数を数えたか（1つの目標につき1回だけ）
+  let roundState = { cleared: false, answerRevealed: false, counted: false };
   let clearedCount = 0;
 
   let solver = null;
@@ -444,7 +446,7 @@
 
     moveHistory = [];
     historyIndex = 0;
-    roundState = { cleared: false, answerRevealed: false };
+    roundState = { cleared: false, answerRevealed: false, counted: false };
 
     btnCheck.disabled = false;
     setStatus("リセットしました。もう一度考えてみましょう。", "");
@@ -487,8 +489,14 @@
     if (!currentGoal || roundState.cleared || roundState.answerRevealed) return;
     if (isAtGoal()) {
       roundState.cleared = true;
-      clearedCount++;
-      clearedBadgeEl.textContent = `クリア: ${clearedCount}`;
+      // クリア数は1つの目標につき1回だけ数える。「元に戻す」で
+      // ゴール状態を解除してからもう一度ゴールに入り直しても、
+      // 二重に数えないようにする。
+      if (!roundState.counted) {
+        roundState.counted = true;
+        clearedCount++;
+        clearedBadgeEl.textContent = `クリア: ${clearedCount}`;
+      }
       setStatus(`🎉 クリア！ ${historyIndex}手でゴールに到達しました。`, "success");
       showClearBanner(historyIndex);
     }
@@ -734,7 +742,7 @@
     selectedRobot = null;
     clearArrows();
     robotEls.forEach((el) => el.classList.remove("selected"));
-    roundState = { cleared: false, answerRevealed: false };
+    roundState = { cleared: false, answerRevealed: false, counted: false };
 
     goalIconEl.innerHTML = "";
     goalIconEl.appendChild(goalIcon(currentGoal.color, currentGoal.shape));
@@ -754,6 +762,8 @@
     updateUndoRedoButtons();
     setStatus("新しい目標が現れました。ロボットをクリックして動かしてみましょう。", "");
     updateNextGoalButtonLabels();
+    // 次の目標に切り替わった時も、操作ボタンが見えるページ下部から始める。
+    if (typeof window.scrollBoardIntoView === "function") window.scrollBoardIntoView();
 
     startSolverForGoal(currentGoal);
   }
@@ -1120,6 +1130,18 @@
     getSolverStatus: () => solverStatus,
     getBoard: () => board,
     getCurrentGoal: () => currentGoal,
+    getActiveColors: () => ACTIVE_COLORS,
+    solveCurrentGoalForTest: () => {
+      const idx = currentGoal.color === "rainbow" ? "any" : colorIndexOf(currentGoal.color);
+      const sv = new IncrementalSolver(board, cloneRobots(robots), idx, currentGoal.r, currentGoal.c, ACTIVE_COLORS);
+      const dl = Date.now() + 6000;
+      while (Date.now() < dl) {
+        const r = sv.step(20);
+        if (r.status === "found") return r.path;
+        if (r.status === "not_found") break;
+      }
+      return null;
+    },
     setCurrentGoal: (g) => { currentGoal = g; },
     getRobots: () => robots,
     getSolver: () => solver,
