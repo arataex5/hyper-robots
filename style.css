@@ -2359,6 +2359,10 @@ body.title-active { overflow: hidden; }
        ボタンの上半分が「枠外」のように反応しなくなる。 */
     position: relative;
     z-index: 1;
+    /* ただし前面に出すと、ボタンが無い「空白部分」まで方向キーの上に
+       かぶさってしまい、下向きボタン（▼）のタップを奪ってしまう。
+       枠自体はタップを受け取らず、中のボタンだけが受け取るようにする。 */
+    pointer-events: none;
     margin-top: calc(-1 * (var(--dpad-size) - var(--deck-left-h)) + 3px);
     width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
     max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
@@ -2429,4 +2433,10 @@ html {
     flex: 1 1 0;
     max-width: none;
   }
+}
+
+/* 操作ボタン枠は空白部分でタップを奪わない（上の .controls 参照）。
+   ボタン本体だけがタップを受け取る。 */
+@media (max-width: 700px) {
+  .controls > * { pointer-events: auto; }
 }

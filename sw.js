@@ -4,7 +4,7 @@
 //
 // CACHE_VERSION は、配布ファイルを更新したら必ず上げること。ここを上げると
 // 古いキャッシュが破棄され、次回起動時に新しいファイルが読み込まれる。
-const CACHE_VERSION = "hyper-robots-v3";
+const CACHE_VERSION = "hyper-robots-v4";
 
 // アプリの見た目・動作に必要な自前のファイル一式。
 const APP_SHELL = [
