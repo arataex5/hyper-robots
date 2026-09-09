@@ -310,6 +310,11 @@
   function clearArrows() {
     mp.arrowEls.forEach((e) => e.remove());
     mp.arrowEls = [];
+    // スマホの操作パネル（ロボット選択・方向キー）は、盤面側の選択状態を
+    // 見て描き直している。オンライン対戦はここが独自実装なので、
+    // 盤面でロボットをタップした時にもパネルを更新しないと、
+    // 選択が反映されず方向キーも押せないままになる。
+    if (typeof window.syncTouchDeck === "function") setTimeout(window.syncTouchDeck, 0);
   }
 
   function robotColor(idx) {
@@ -318,6 +323,7 @@
 
   function showArrowsForRobot(idx) {
     clearArrows();
+    if (typeof window.syncTouchDeck === "function") setTimeout(window.syncTouchDeck, 0);
     const boardEl = document.getElementById("board");
     const pos = mp.robots[idx];
     const myColor = robotColor(idx);
@@ -1992,6 +1998,10 @@
     }
     if (typeof window.scrollBoardIntoView === "function") window.scrollBoardIntoView();
     updateNewMapButtonForOnline();
+    // 再接続した時点で既に自分ひとりだった場合も、15秒後にソロモードの
+    // 提案を出す。人数の増減が起きないと確認が走らないため、開始・再開の
+    // タイミングでも明示的に確認する。
+    checkAloneStatus();
 
     const playModeBadge = document.getElementById("play-mode-badge");
     if (playModeBadge) playModeBadge.textContent = "オンライン対戦モード";
@@ -2096,6 +2106,9 @@
         // なかったため判定が空振りしている可能性がある。
         adoptCountdownAsNewHost();
         maybeResolveAfterRosterChange();
+        // ホストになった時点で既に自分ひとりなら、ここでも確認する
+        // （ホストでない間は checkAloneStatus が何もしないため）。
+        checkAloneStatus();
       }
       lastKnownHostPeerId = newHostPeerId;
     });
@@ -2137,6 +2150,10 @@
     }
     if (typeof window.scrollBoardIntoView === "function") window.scrollBoardIntoView();
     updateNewMapButtonForOnline();
+    // 再接続した時点で既に自分ひとりだった場合も、15秒後にソロモードの
+    // 提案を出す。人数の増減が起きないと確認が走らないため、開始・再開の
+    // タイミングでも明示的に確認する。
+    checkAloneStatus();
 
     const playModeBadge = document.getElementById("play-mode-badge");
     if (playModeBadge) playModeBadge.textContent = "オンライン対戦モード";
@@ -2252,6 +2269,7 @@
   window._HRMultiplayerDebug = {
     getState: () => mp,
     tickCountdownForTest: () => tickCountdown(),
+    checkAloneStatusForTest: () => checkAloneStatus(),
     showDisconnectBannerForTest: (peerId) => showDisconnectBanner(peerId),
     triggerEndMatchForTest: () => endMatch(),
   };

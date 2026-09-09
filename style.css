@@ -2355,7 +2355,7 @@ body.title-active { overflow: hidden; }
        ボタンの上半分が「枠外」のように反応しなくなる。 */
     position: relative;
     z-index: 1;
-    margin-top: calc(-1 * (var(--dpad-size) - var(--deck-left-h)) + 18px);
+    margin-top: calc(-1 * (var(--dpad-size) - var(--deck-left-h)) + 8px);
     width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
     max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
   }
@@ -2402,7 +2402,11 @@ html {
   }
   /* 1段目だけは方向キーと重ならない幅に抑え、左詰めにする */
   #btn-online-declare {
-    flex: 0 0 calc(100% - var(--dpad-size) - var(--deck-col-gap));
+    /* flex-basis を 100% にして必ず1行を占有させる（行の折り返しは
+       basis で決まる）。実際の見た目の幅は max-width で方向キーを
+       避ける幅に抑える。basis を幅と同じにすると、次のボタンが
+       余った右側に入り込んで同じ行に並んでしまう。 */
+    flex: 0 0 100%;
     max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
     margin-right: auto;
   }
