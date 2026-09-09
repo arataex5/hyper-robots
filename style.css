@@ -219,6 +219,10 @@ body {
   flex-wrap: wrap;
 }
 
+/* スマホで操作ボタンを2段に分けるための改行用要素。
+   PCでは1行に収まるので使わない（スマホ幅でのみ block にする）。 */
+.controls-break { display: none; }
+
 /* ---------- status line ---------- */
 
 .status-line {
@@ -2355,7 +2359,7 @@ body.title-active { overflow: hidden; }
        ボタンの上半分が「枠外」のように反応しなくなる。 */
     position: relative;
     z-index: 1;
-    margin-top: calc(-1 * (var(--dpad-size) - var(--deck-left-h)) + 8px);
+    margin-top: calc(-1 * (var(--dpad-size) - var(--deck-left-h)) + 3px);
     width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
     max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
   }
@@ -2400,15 +2404,24 @@ html {
     width: 100%;
     max-width: 100%;
   }
-  /* 1段目だけは方向キーと重ならない幅に抑え、左詰めにする */
+  /* 1段目だけは方向キーと重ならない幅に抑え、左詰めにする。
+     ※ flex-basis を 100% にしても、max-width で幅を抑えると
+       「折り返し判定に使われるサイズ」もそこまで縮むため、次のボタンが
+       余った右側に入り込んでしまう。確実に段を分けるために、専用の
+       改行用要素（.controls-break）を挟んでいる。 */
   #btn-online-declare {
-    /* flex-basis を 100% にして必ず1行を占有させる（行の折り返しは
-       basis で決まる）。実際の見た目の幅は max-width で方向キーを
-       避ける幅に抑える。basis を幅と同じにすると、次のボタンが
-       余った右側に入り込んで同じ行に並んでしまう。 */
-    flex: 0 0 100%;
+    flex: 0 1 auto;
+    width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
     max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
     margin-right: auto;
+  }
+  /* 改行用（高さゼロで1行ぶんの幅を占め、後続を次の段へ送る） */
+  .controls-break {
+    display: block;
+    flex: 0 0 100%;
+    width: 100%;
+    height: 0;
+    margin: 0;
   }
   /* 2段目の2つは横並びで半分ずつ */
   #btn-online-giveup,

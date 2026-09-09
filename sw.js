@@ -4,7 +4,7 @@
 //
 // CACHE_VERSION は、配布ファイルを更新したら必ず上げること。ここを上げると
 // 古いキャッシュが破棄され、次回起動時に新しいファイルが読み込まれる。
-const CACHE_VERSION = "hyper-robots-v1";
+const CACHE_VERSION = "hyper-robots-v3";
 
 // アプリの見た目・動作に必要な自前のファイル一式。
 const APP_SHELL = [
@@ -80,18 +80,23 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // それ以外（CSS/JS/画像）はキャッシュ優先。表示が速く、オフラインでも動く。
+  // それ以外（CSS/JS/画像）もネットワーク優先にする。
+  //
+  // 以前はキャッシュ優先にしていたが、これだと更新版を配信しても端末には
+  // 古いファイルが配信され続けてしまう。実際、
+  //   ・見た目の修正が反映されない
+  //   ・端末ごとに違う版が動き、PCとスマホで対戦できない
+  // という不具合の原因になっていた（新旧のコードが混在するため）。
+  // 通信できない時だけキャッシュを使う形にして、常に最新を配る。
   event.respondWith(
-    caches.match(req).then((hit) => {
-      if (hit) return hit;
-      return fetch(req).then((res) => {
-        // 正常に取れたものだけ保存する（エラー応答を保存しない）。
+    fetch(req)
+      .then((res) => {
         if (res && res.status === 200 && res.type === "basic") {
           const copy = res.clone();
           caches.open(CACHE_VERSION).then((cache) => cache.put(req, copy));
         }
         return res;
-      });
-    })
+      })
+      .catch(() => caches.match(req))
   );
 });

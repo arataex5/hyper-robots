@@ -5,10 +5,29 @@
   if (location.protocol !== "http:" && location.protocol !== "https:") return;
 
   window.addEventListener("load", function () {
-    navigator.serviceWorker.register("./sw.js").catch(function () {
+    navigator.serviceWorker.register("./sw.js").then(function (reg) {
+      // 更新があればすぐ取りに行く。古いファイルが配信され続けて
+      // 端末ごとに違う版が動く（＝対戦できない）事故を防ぐ。
+      try { reg.update(); } catch (e) { /* noop */ }
+      reg.addEventListener("updatefound", function () {
+        var sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener("statechange", function () {
+          // 新しい版が入って、既に古い版が動いていた場合は読み込み直す。
+          if (sw.state === "installed" && navigator.serviceWorker.controller) {
+            window.location.reload();
+          }
+        });
+      });
+    }).catch(function () {
       // 登録できなくてもオンライン中は普通に遊べるので、静かに諦める。
     });
   });
+
+  // どの版が動いているかを確認できるようにしておく。
+  // （端末ごとに違う版が動いていないかの切り分け用）
+  window.HR_BUILD = "2026-09-09-b";
+  try { console.log("ハイパーロボット build:", window.HR_BUILD); } catch (e) { /* noop */ }
 
   // スマホのアドレスバーの高さが変わっても画面いっぱいに収まるように、
   // 実際に見えている高さを CSS 変数（--vh）として渡す。
