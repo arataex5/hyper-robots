@@ -998,6 +998,15 @@
   document.querySelectorAll(".touch-robot").forEach((btn) => {
     btn.addEventListener("click", () => deckSelectRobot(Number(btn.dataset.robot)));
   });
+
+  // スリープや別アプリから戻ってきた時、操作パネルが未描画のまま
+  // （ロボット選択が5個とも白いまま）になることがある。画面が
+  // 再び見えたタイミングで必ず描き直す。
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") syncTouchDeck();
+  });
+  window.addEventListener("pageshow", () => syncTouchDeck());
+  window.addEventListener("focus", () => syncTouchDeck());
   document.querySelectorAll(".dpad-btn").forEach((btn) => {
     btn.addEventListener("click", () => deckMove(btn.dataset.dir));
   });

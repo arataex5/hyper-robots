@@ -2167,6 +2167,8 @@ body.title-active { overflow: hidden; }
 
   /* ロボット選択（5色分の枠を確保。4色モードでは5個目を隠す） */
   .touch-robot {
+    /* 色が入る前（描き直し前）でも白く見えないよう、既定色を置いておく */
+    background: var(--panel-2);
     width: 44px;
     height: 44px;
     flex: 0 0 auto;
@@ -2348,7 +2350,12 @@ body.title-active { overflow: hidden; }
      選択）との間に大きな空白ができてしまう。その空白ぶんだけ操作ボタンを
      引き上げ、方向キーの左どなりに収まるよう幅も制限する。 */
   .controls {
-    margin-top: calc(-1 * (var(--dpad-size) - var(--deck-left-h)) - 10px);
+    /* 引き上げると方向キーの領域と重なるため、重なった部分でも確実に
+       タップを受け取れるように前面に出しておく。これをしないと、
+       ボタンの上半分が「枠外」のように反応しなくなる。 */
+    position: relative;
+    z-index: 1;
+    margin-top: calc(-1 * (var(--dpad-size) - var(--deck-left-h)) + 18px);
     width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
     max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
   }
@@ -2376,4 +2383,33 @@ html {
 }
 .giveup-confirm-actions .btn {
   flex: 1 1 0;
+}
+
+/* ---------- スマホ：オンライン対戦の操作ボタンの並び ----------
+   1段目：回答する（方向キーを避ける幅）
+   2段目：ギブアップ ／ ソロモードに切り替える（画面幅を二分）
+   ソロモードは従来どおり、方向キーを避けた幅に2つ横並び。 */
+@media (max-width: 700px) {
+  #solo-controls {
+    width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
+    max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
+  }
+
+  /* 2段目は方向キーより下に来るので、画面幅いっぱいを使える */
+  #online-controls {
+    width: 100%;
+    max-width: 100%;
+  }
+  /* 1段目だけは方向キーと重ならない幅に抑え、左詰めにする */
+  #btn-online-declare {
+    flex: 0 0 calc(100% - var(--dpad-size) - var(--deck-col-gap));
+    max-width: calc(100% - var(--dpad-size) - var(--deck-col-gap));
+    margin-right: auto;
+  }
+  /* 2段目の2つは横並びで半分ずつ */
+  #btn-online-giveup,
+  #btn-switch-to-solo {
+    flex: 1 1 0;
+    max-width: none;
+  }
 }
