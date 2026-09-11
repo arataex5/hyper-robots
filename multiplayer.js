@@ -1989,6 +1989,11 @@
     if (switchSoloBtn) switchSoloBtn.classList.add("hidden");
     const soloSuggestOverlay = document.getElementById("solo-suggest-overlay");
     if (soloSuggestOverlay) soloSuggestOverlay.classList.add("hidden");
+    // リザルト画面などが残ったまま次の対戦が始まらないようにする。
+    ["result-screen-overlay", "next-ready-overlay", "giveup-confirm-overlay"].forEach((id) => {
+      const ov = document.getElementById(id);
+      if (ov) ov.classList.add("hidden");
+    });
     // 前の対戦で勝敗判定カウントダウンが出たまま抜けていると、次の
     // 対戦の開始時にその表示が残ってしまうので、必ず消しておく。
     const bigCountdownEl = document.getElementById("big-countdown-display");
@@ -2141,6 +2146,11 @@
     if (switchSoloBtn) switchSoloBtn.classList.add("hidden");
     const soloSuggestOverlay = document.getElementById("solo-suggest-overlay");
     if (soloSuggestOverlay) soloSuggestOverlay.classList.add("hidden");
+    // リザルト画面などが残ったまま次の対戦が始まらないようにする。
+    ["result-screen-overlay", "next-ready-overlay", "giveup-confirm-overlay"].forEach((id) => {
+      const ov = document.getElementById(id);
+      if (ov) ov.classList.add("hidden");
+    });
     // 前の対戦で勝敗判定カウントダウンが出たまま抜けていると、次の
     // 対戦の開始時にその表示が残ってしまうので、必ず消しておく。
     const bigCountdownEl = document.getElementById("big-countdown-display");

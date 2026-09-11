@@ -920,6 +920,14 @@
         if (onlineControls) onlineControls.classList.add("hidden");
         if (onlineHud) onlineHud.classList.add("hidden");
         if (soloControls) soloControls.classList.remove("hidden");
+        // 対局中に出していたオーバーレイ類も必ず閉じる。
+        // リザルト画面を出したままタイトルへ戻ると、そのあとソロモードを
+        // 始めた時にリザルトが残って表示されてしまう。
+        ["result-screen-overlay", "next-ready-overlay", "solo-suggest-overlay",
+         "giveup-confirm-overlay"].forEach((id) => {
+          const ov = document.getElementById(id);
+          if (ov) ov.classList.add("hidden");
+        });
         const newMapBtn = document.getElementById("btn-new-map");
         if (newMapBtn) newMapBtn.classList.remove("hidden");
       }
@@ -1075,6 +1083,13 @@
       bigCountdown.classList.add("hidden");
       bigCountdown.classList.remove("flash-hidden");
     }
+    // オンライン対戦のオーバーレイが残っていたら閉じる（どの経路から
+    // ソロモードに入っても、前の対戦の画面が残らないようにする）。
+    ["result-screen-overlay", "next-ready-overlay", "solo-suggest-overlay",
+     "giveup-confirm-overlay"].forEach((id) => {
+      const ov = document.getElementById(id);
+      if (ov) ov.classList.add("hidden");
+    });
 
     ACTIVE_COLORS = mode === "five" ? COLOR_SETS.five : COLOR_SETS.four;
     USE_DIAGONALS = !!useDiagonals;
