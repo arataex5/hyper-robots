@@ -701,6 +701,10 @@
     roundState.answerRevealed = true;
     updateUndoRedoButtons();
     locked = false;
+    // 操作パネル（ロボット選択・方向キー）は locked の状態を見て
+    // 描き直している。ロックを解除したら必ず描き直さないと、
+    // 非アクティブのまま固まってしまう。
+    if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
   }
 
   // ---------- goal / round progression ----------
@@ -781,9 +785,11 @@
       setTimeout(() => {
         locked = false;
         revealCurrentGoal();
+        if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
       }, MOVE_ANIM_MS + 120);
     } else {
       revealCurrentGoal();
+      if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
     }
   }
 
