@@ -465,14 +465,15 @@
 
     moveHistory = [];
     historyIndex = 0;
-    // cleared（今ゴール状態か）だけを解除する。
-    // counted（この目標で既に達成数を数えたか）と answerRevealed
-    // （答え合わせ済みか）はリセットしても保持する。ここを初期化すると、
-    // リセット→もう一度ゴール のたびに達成ゴール数が増えてしまい、
-    // 答え合わせ後もリセットすれば数えられてしまう。
+    // cleared（今ゴール状態か）と answerRevealed（答え合わせ済みか）は
+    // 解除する。answerRevealed を残すと「答え合わせ」を2回目以降
+    // 押せなくなってしまうため。
+    // 一方 counted（この目標で既に達成数を数えたか）は保持する。
+    // ここを初期化すると、リセット→もう一度ゴール のたびに達成ゴール数が
+    // 増えてしまう。答え合わせ後に数えないのも counted 側で担保する。
     roundState = {
       cleared: false,
-      answerRevealed: roundState.answerRevealed,
+      answerRevealed: false,
       counted: roundState.counted,
     };
 
@@ -717,6 +718,9 @@
     historyIndex = 0;
     updateMoveCount();
     roundState.answerRevealed = true;
+    // 答え合わせをした目標は、以降この目標では達成ゴール数を数えない。
+    // （リセットして自力でゴールし直しても増やさない）
+    roundState.counted = true;
     updateUndoRedoButtons();
     locked = false;
     // 操作パネル（ロボット選択・方向キー）は locked の状態を見て
