@@ -733,11 +733,12 @@
     updateGoalsRemaining();
   }
 
-  // 達成ゴール数：オンラインでは自分が取った得点（＝勝った目標の数）。
+  // 達成ゴール数：誰かがクリアできた目標の数（全体の合計）。
+  // 自分の得点はプレイヤー一覧の方に出るので、ここは全体の数にする。
   function updateGoalsCleared() {
     const el = document.getElementById("goals-cleared");
     if (!el || !mp) return;
-    el.textContent = String(mp.scores[mp.myPeerId] || 0);
+    el.textContent = String(mp.roundsPlayed || 0);
   }
 
   function updateGoalsRemaining() {
@@ -1223,8 +1224,8 @@
 
   function applyRoundResult(msg) {
     mp.scores = msg.scores;
-    updateGoalsCleared();
     if (msg.roundsPlayed != null) mp.roundsPlayed = msg.roundsPlayed;
+    updateGoalsCleared(); // roundsPlayed を反映した後に表示を更新する
     if (msg.championRoute) mp.lastChampionRoute = msg.championRoute; // ゲスト側にもリプレイ用に伝わるようにする
     const p = mp.players.find((x) => x.peerId === msg.winnerId);
     if (msg.matchOver) {

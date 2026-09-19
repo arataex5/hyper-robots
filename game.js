@@ -465,7 +465,16 @@
 
     moveHistory = [];
     historyIndex = 0;
-    roundState = { cleared: false, answerRevealed: false, counted: false };
+    // cleared（今ゴール状態か）だけを解除する。
+    // counted（この目標で既に達成数を数えたか）と answerRevealed
+    // （答え合わせ済みか）はリセットしても保持する。ここを初期化すると、
+    // リセット→もう一度ゴール のたびに達成ゴール数が増えてしまい、
+    // 答え合わせ後もリセットすれば数えられてしまう。
+    roundState = {
+      cleared: false,
+      answerRevealed: roundState.answerRevealed,
+      counted: roundState.counted,
+    };
 
     btnCheck.disabled = false;
     setStatus("リセットしました。もう一度考えてみましょう。", "");
@@ -925,6 +934,9 @@
 
   function newMap() {
     bestClearSnapshot = null; // 新しい盤面では前の目標の記録は無効
+    clearedCount = 0;         // 達成ゴール数も新しい盤面で0に戻す
+    if (clearedBadgeEl) clearedBadgeEl.textContent = "クリア: 0";
+    updateGoalsCleared();
     if (checkPollTimer) {
       clearInterval(checkPollTimer);
       checkPollTimer = null;
@@ -1183,6 +1195,9 @@
   // そのまま引き継いで、乱数で新しい盤面を作り直さずにソロモードへ移る。
   function startWithPresetState(presetState) {
     bestClearSnapshot = null; // 引き継ぎ開始時も前の記録は持ち越さない
+    clearedCount = 0;
+    if (clearedBadgeEl) clearedBadgeEl.textContent = "クリア: 0";
+    updateGoalsCleared();
     if (checkPollTimer) { clearInterval(checkPollTimer); checkPollTimer = null; }
     if (thinkingShowTimer) { clearTimeout(thinkingShowTimer); thinkingShowTimer = null; }
     hideThinkingOverlay();
