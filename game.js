@@ -53,6 +53,17 @@
   // cleared: 今この瞬間ゴール状態か（元に戻すで解除される表示用の状態）
   // counted: この目標で既にクリア数を数えたか（1つの目標につき1回だけ）
   let roundState = { cleared: false, answerRevealed: false, counted: false };
+  // この目標で「一番少ない手数でゴールした時」のロボット配置。
+  // プレイヤーでもコンピュータの答え合わせでも記録する。
+  // 同じ手数が複数回出た場合は、先にゴールした方を残す（moves が
+  // 厳密に小さい時だけ上書きする）。
+  // リセットしても消さない（一度ゴールした事実は残す）。
+  let bestClearSnapshot = null; // { moves, robots }
+
+  function recordClearSnapshot(moves) {
+    if (bestClearSnapshot && moves >= bestClearSnapshot.moves) return;
+    bestClearSnapshot = { moves, robots: cloneRobots(robots) };
+  }
   let clearedCount = 0;
 
   let solver = null;
@@ -489,6 +500,7 @@
     if (!currentGoal || roundState.cleared || roundState.answerRevealed) return;
     if (isAtGoal()) {
       roundState.cleared = true;
+      recordClearSnapshot(historyIndex);
       // クリア数は1つの目標につき1回だけ数える。「元に戻す」で
       // ゴール状態を解除してからもう一度ゴールに入り直しても、
       // 二重に数えないようにする。
@@ -668,6 +680,7 @@
 
     if (path.length === 0) {
       setStatus("この目標のロボットは、最初からゴールの位置にいました。", "info");
+      recordClearSnapshot(0);
     } else {
       for (const step of path) {
         const waypoints = (step.bends && step.bends.length > 0) ? [...step.bends, step.to] : [step.to];
@@ -679,6 +692,7 @@
         }
       }
       setStatus(`🤖 コンピュータの最短手順は ${path.length}手 でした。`, "info");
+      recordClearSnapshot(path.length);
     }
 
     moveHistory = [];
@@ -735,7 +749,6 @@
       endSoloGame();
       return;
     }
-    currentGoal = targetQueue[goalIndex];
 
     moveHistory = [];
     historyIndex = 0;
@@ -743,6 +756,40 @@
     clearArrows();
     robotEls.forEach((el) => el.classList.remove("selected"));
     roundState = { cleared: false, answerRevealed: false, counted: false };
+
+    // --- 次の目標の開始位置を決めて、先に配置を戻す ---
+    // ・前の目標で一度でもゴールしていれば、その中で最少手だった時の配置
+    //   （同じ手数が複数あれば先にゴールした方）。ゴール後にリセットして
+    //   いても、この配置から始める。
+    // ・一度もゴールしていなければ、前の目標の開始時の配置に戻す。
+    const restoreTo = bestClearSnapshot ? bestClearSnapshot.robots : solverStartSnapshot;
+    bestClearSnapshot = null;
+    let moving = false;
+    if (restoreTo) {
+      moving = robots.some((p, i) => !restoreTo[i] || p.r !== restoreTo[i].r || p.c !== restoreTo[i].c);
+      robots = cloneRobots(restoreTo);
+      robots.forEach((p, idx) => setPercentPos(robotEls[idx], p.r, p.c));
+    }
+    updateMoveCount();
+    updateUndoRedoButtons();
+
+    // 配置が動く場合は、その移動が終わってから次の目標を出す
+    // （目標を先に出すと、まだ前の配置のまま見えてしまうため）。
+    if (moving) {
+      locked = true;
+      setStatus("ロボットを配置しています…", "");
+      setTimeout(() => {
+        locked = false;
+        revealCurrentGoal();
+      }, MOVE_ANIM_MS + 120);
+    } else {
+      revealCurrentGoal();
+    }
+  }
+
+  // 次の目標を実際に画面へ出す（配置の復元が終わってから呼ばれる）
+  function revealCurrentGoal() {
+    currentGoal = targetQueue[goalIndex];
 
     goalIconEl.innerHTML = "";
     goalIconEl.appendChild(goalIcon(currentGoal.color, currentGoal.shape));
@@ -856,6 +903,7 @@
   window.hideMapGenOverlay = hideMapGenOverlay;
 
   function newMap() {
+    bestClearSnapshot = null; // 新しい盤面では前の目標の記録は無効
     if (checkPollTimer) {
       clearInterval(checkPollTimer);
       checkPollTimer = null;
@@ -1113,6 +1161,7 @@
   // 遷移してきた場合に使う。既存の盤面・ロボット配置・残り目標数を
   // そのまま引き継いで、乱数で新しい盤面を作り直さずにソロモードへ移る。
   function startWithPresetState(presetState) {
+    bestClearSnapshot = null; // 引き継ぎ開始時も前の記録は持ち越さない
     if (checkPollTimer) { clearInterval(checkPollTimer); checkPollTimer = null; }
     if (thinkingShowTimer) { clearTimeout(thinkingShowTimer); thinkingShowTimer = null; }
     hideThinkingOverlay();
