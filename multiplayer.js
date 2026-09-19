@@ -2278,7 +2278,7 @@
     }),
     selectRobot: (idx) => {
       if (!mp || mp.locked || mp.matchOver) return;
-      if (idx >= mp.colors.length) return;
+      if (idx >= Math.min(mp.colors.length, mp.robots.length)) return;
       onRobotClick(idx);
       if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
     },

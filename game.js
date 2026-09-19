@@ -61,6 +61,12 @@
   // リセットしても消さない（一度ゴールした事実は残す）。
   let bestClearSnapshot = null; // { moves, robots }
 
+  // 進行中のアニメーション（移動・答え合わせの再生）を無効化するための世代番号。
+  // 「次の問題へ」で配置を戻した後に、前の目標のアニメーションの続きが
+  // 走ってロボットを動かしてしまうと、戻しかけの中途半端な配置になる。
+  // 世代が変わったら、古いアニメーションは途中で打ち切る。
+  let animGeneration = 0;
+
   function recordClearSnapshot(moves) {
     if (bestClearSnapshot && moves >= bestClearSnapshot.moves) return;
     bestClearSnapshot = { moves, robots: cloneRobots(robots) };
@@ -370,11 +376,13 @@
   }
 
   function animateMove(idx, to, onDone) {
+    const gen = animGeneration;
     locked = true;
     clearArrows();
     robots[idx] = to;
     setPercentPos(robotEls[idx], to.r, to.c);
     setTimeout(() => {
+      if (gen !== animGeneration) return; // 目標が切り替わったので打ち切る
       locked = false;
       if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
       if (onDone) onDone();
@@ -384,10 +392,12 @@
   // 斜め壁で方向転換したときに、実際に曲がって進んだように見せるための
   // アニメーション。waypoints は途中の折れ点＋最終地点の配列。
   function animateMoveAlongPath(idx, waypoints, onDone) {
+    const gen = animGeneration;
     locked = true;
     clearArrows();
     let i = 0;
     const step = () => {
+      if (gen !== animGeneration) return; // 目標が切り替わったので打ち切る
       if (i >= waypoints.length) {
         locked = false;
         if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
@@ -685,6 +695,7 @@
   }
 
   async function revealAnswer(path) {
+    const gen = animGeneration;
     locked = true;
     if (selectedRobot !== null) {
       robotEls[selectedRobot].classList.remove("selected");
@@ -704,6 +715,9 @@
       for (const step of path) {
         const waypoints = (step.bends && step.bends.length > 0) ? [...step.bends, step.to] : [step.to];
         for (const wp of waypoints) {
+          // 目標が切り替わったら、再生の途中でもここで止める。
+          // 止めないと、次の目標用に戻した配置を上書きしてしまう。
+          if (gen !== animGeneration) return;
           robots[step.robot] = wp;
           setPercentPos(robotEls[step.robot], wp.r, wp.c);
           // eslint-disable-next-line no-await-in-loop
@@ -714,6 +728,7 @@
       recordClearSnapshot(path.length);
     }
 
+    if (gen !== animGeneration) return; // 切り替わっていたら後始末もしない
     moveHistory = [];
     historyIndex = 0;
     updateMoveCount();
@@ -783,6 +798,11 @@
     robotEls.forEach((el) => el.classList.remove("selected"));
     roundState = { cleared: false, answerRevealed: false, counted: false };
 
+    // 進行中のアニメーション（移動中・答え合わせの再生中）を無効にする。
+    // これをしないと、下で配置を戻した直後に古いアニメーションの続きが
+    // ロボットを動かしてしまい、戻しかけの中途半端な配置になる。
+    animGeneration++;
+
     // --- 次の目標の開始位置を決めて、先に配置を戻す ---
     // ・前の目標で一度でもゴールしていれば、その中で最少手だった時の配置
     //   （同じ手数が複数あれば先にゴールした方）。ゴール後にリセットして
@@ -791,9 +811,18 @@
     const restoreTo = bestClearSnapshot ? bestClearSnapshot.robots : solverStartSnapshot;
     bestClearSnapshot = null;
     let moving = false;
-    if (restoreTo) {
-      moving = robots.some((p, i) => !restoreTo[i] || p.r !== restoreTo[i].r || p.c !== restoreTo[i].c);
-      robots = cloneRobots(restoreTo);
+    // 記録した配置は、今のロボットの数と一致する時だけ使う。
+    // 色数を変えて新しいゲームを始めた直後は、前のゲームの配置
+    // （例：5色ぶん5体）が残っていることがあり、そのまま当てはめると
+    // 存在しないロボットを触って例外になる。例外で nextGoal が
+    // 途中で止まると、配置を戻しかけたまま目標も出ない状態になる。
+    const usableSnapshot =
+      restoreTo && restoreTo.length === robots.length && restoreTo.length === robotEls.length
+        ? restoreTo
+        : null;
+    if (usableSnapshot) {
+      moving = robots.some((p, i) => p.r !== usableSnapshot[i].r || p.c !== usableSnapshot[i].c);
+      robots = cloneRobots(usableSnapshot);
       robots.forEach((p, idx) => setPercentPos(robotEls[idx], p.r, p.c));
     }
     updateMoveCount();
@@ -810,6 +839,9 @@
         if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
       }, MOVE_ANIM_MS + 120);
     } else {
+      // 打ち切ったアニメーションが locked を立てたままの可能性があるので、
+      // 動かさない場合はここで確実に解除する。
+      locked = false;
       revealCurrentGoal();
       if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
     }
@@ -937,6 +969,8 @@
   window.hideMapGenOverlay = hideMapGenOverlay;
 
   function newMap() {
+    animGeneration++; // 進行中のアニメーションを打ち切る
+    solverStartSnapshot = null; // 前のゲームの配置は引き継がない（色数が変わることがある）
     bestClearSnapshot = null; // 新しい盤面では前の目標の記録は無効
     clearedCount = 0;         // 達成ゴール数も新しい盤面で0に戻す
     if (clearedBadgeEl) clearedBadgeEl.textContent = "クリア: 0";
@@ -1046,7 +1080,7 @@
     const o = deckOnline();
     if (o) { o.selectRobot(idx); return; }
     if (locked || gameOver) return;
-    if (idx >= ACTIVE_COLORS.length) return;
+    if (idx >= Math.min(ACTIVE_COLORS.length, robots.length)) return;
     onRobotClick(idx);
     syncTouchDeck();
   }
@@ -1066,9 +1100,17 @@
       ? o.getState()
       : { colors: ACTIVE_COLORS, robots, board, selected: selectedRobot, locked: locked || gameOver };
 
+    // 色数とロボット数の少ない方を使う。盤面を作り直している最中は
+    // 「色は5つだがロボットはまだ4体」という瞬間があり、色数だけで
+    // 判断すると存在しないロボットを触って例外になる。例外が起きると
+    // この関数が途中で止まり、方向キーが有効にならないまま固まる
+    // （5色モードで黒ロボットが操作できなくなる原因）。
+    const robotCount = st.robots ? st.robots.length : 0;
+    const usable = Math.min(st.colors.length, robotCount);
+
     document.querySelectorAll(".touch-robot").forEach((btn) => {
       const i = Number(btn.dataset.robot);
-      const active = i < st.colors.length;
+      const active = i < usable;
       btn.classList.toggle("hidden", !active);
       if (!active) return;
       btn.style.background = `var(--c-${st.colors[i]})`;
@@ -1079,7 +1121,7 @@
     document.querySelectorAll(".dpad-btn").forEach((btn) => {
       const dir = btn.dataset.dir;
       let ok = false;
-      if (!st.locked && st.selected !== null && st.selected < st.colors.length) {
+      if (!st.locked && st.selected !== null && st.selected < usable && st.board && st.robots[st.selected]) {
         ok = canMoveAtAll(st.board, st.robots, st.selected, dir, st.colors[st.selected]);
       }
       btn.disabled = !ok;
@@ -1199,6 +1241,7 @@
   // そのまま引き継いで、乱数で新しい盤面を作り直さずにソロモードへ移る。
   function startWithPresetState(presetState) {
     bestClearSnapshot = null; // 引き継ぎ開始時も前の記録は持ち越さない
+    solverStartSnapshot = null;
     clearedCount = 0;
     if (clearedBadgeEl) clearedBadgeEl.textContent = "クリア: 0";
     updateGoalsCleared();
