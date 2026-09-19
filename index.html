@@ -262,10 +262,6 @@
 
     <header class="topbar">
       <h1 class="logo">ハイパーロボット</h1>
-      <div class="player-badge" id="player-badge">
-        <div class="player-badge-avatar" id="player-badge-avatar"></div>
-        <span id="player-badge-name"></span>
-      </div>
       <span class="mode-badge" id="play-mode-badge">一人用モード</span>
       <span class="mode-badge" id="color-mode-badge">4色モード</span>
       <span class="mode-badge" id="diagonal-mode-badge" style="display:none;">斜め壁あり</span>
@@ -287,13 +283,13 @@
         </div>
       </div>
       <div class="stat-group">
-        <div class="stat">
-          <span class="stat-label">手数</span>
-          <span class="stat-value" id="move-count">0</span>
-        </div>
         <div class="stat" id="goals-remaining-stat">
           <span class="stat-label">残りゴール</span>
           <span class="stat-value" id="goals-remaining">-</span>
+        </div>
+        <div class="stat" id="goals-cleared-stat">
+          <span class="stat-label">達成ゴール</span>
+          <span class="stat-value" id="goals-cleared">0</span>
         </div>
       </div>
     </section>

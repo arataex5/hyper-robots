@@ -14,7 +14,8 @@
   const boardEl = document.getElementById("board");
   const goalIconEl = document.getElementById("goal-icon");
   const goalDescEl = document.getElementById("goal-desc");
-  const moveCountEl = document.getElementById("move-count");
+  // 手数の表示は盤面中央に置くようになり、盤面の描画時に作られる。
+  // 読み込み時にはまだ存在しないので、使う時に取り直す。
   const statusLineEl = document.getElementById("status-line");
   const clearedBadgeEl = document.getElementById("cleared-badge");
   const clearBannerEl = document.getElementById("clear-banner");
@@ -112,7 +113,8 @@
   }
 
   function updateMoveCount() {
-    moveCountEl.textContent = String(historyIndex);
+    const moveCountEl = document.getElementById("move-count");
+    if (moveCountEl) moveCountEl.textContent = String(historyIndex);
   }
 
   function updateUndoRedoButtons() {
@@ -178,6 +180,12 @@
 
     const core = document.createElement("div");
     core.className = "core";
+    // 現在の手数は盤面中央のブロックに出す（盤面の上だと見づらいため）。
+    const coreMoves = document.createElement("div");
+    coreMoves.className = "core-move-count";
+    coreMoves.id = "move-count";
+    coreMoves.textContent = "0";
+    core.appendChild(coreMoves);
     boardEl.appendChild(core);
 
     if (board.diagonals && board.diagonals.size > 0) {
@@ -508,6 +516,7 @@
         roundState.counted = true;
         clearedCount++;
         clearedBadgeEl.textContent = `クリア: ${clearedCount}`;
+        updateGoalsCleared();
       }
       setStatus(`🎉 クリア！ ${historyIndex}手でゴールに到達しました。`, "success");
       showClearBanner(historyIndex);
@@ -821,7 +830,13 @@
     startSolverForGoal(currentGoal);
   }
 
+  function updateGoalsCleared() {
+    const el = document.getElementById("goals-cleared");
+    if (el) el.textContent = String(clearedCount);
+  }
+
   function updateGoalsRemaining() {
+    updateGoalsCleared();
     if (!goalsRemainingEl) return;
     // goalIndex は0始まりで「今出ているお題の番号」。今出ている分は
     // 既に消化中なので、残りは totalGoals - (goalIndex + 1) となる。

@@ -236,6 +236,12 @@
 
     const core = document.createElement("div");
     core.className = "core";
+    // 現在の手数は盤面中央のブロックに出す（盤面の上だと見づらいため）。
+    const coreMoves = document.createElement("div");
+    coreMoves.className = "core-move-count";
+    coreMoves.id = "move-count";
+    coreMoves.textContent = "0";
+    core.appendChild(coreMoves);
     boardEl.appendChild(core);
 
     if (mp.board.diagonals && mp.board.diagonals.size > 0) {
@@ -727,7 +733,15 @@
     updateGoalsRemaining();
   }
 
+  // 達成ゴール数：オンラインでは自分が取った得点（＝勝った目標の数）。
+  function updateGoalsCleared() {
+    const el = document.getElementById("goals-cleared");
+    if (!el || !mp) return;
+    el.textContent = String(mp.scores[mp.myPeerId] || 0);
+  }
+
   function updateGoalsRemaining() {
+    updateGoalsCleared();
     const el = document.getElementById("goals-remaining");
     const stat = document.getElementById("goals-remaining-stat");
     // サドンデス中は「残りいくつ」という概念自体がない（決着がつくまで
@@ -1106,6 +1120,7 @@
     if (valid && reachedGoal && countMatches) {
       mp.scores[msg.peerId] = (mp.scores[msg.peerId] || 0) + 1;
       mp.roundsPlayed++;
+      updateGoalsCleared();
       // チャンピオン（宣言が承認されたプレイヤー）の検証済みの最終位置を
       // ホスト自身のロボット状態にも反映しておく。これをしないと、
       // ホスト自身がラウンド中に別の手を試していた場合、次のお題が
@@ -1208,6 +1223,7 @@
 
   function applyRoundResult(msg) {
     mp.scores = msg.scores;
+    updateGoalsCleared();
     if (msg.roundsPlayed != null) mp.roundsPlayed = msg.roundsPlayed;
     if (msg.championRoute) mp.lastChampionRoute = msg.championRoute; // ゲスト側にもリプレイ用に伝わるようにする
     const p = mp.players.find((x) => x.peerId === msg.winnerId);
