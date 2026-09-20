@@ -61,6 +61,12 @@
   // リセットしても消さない（一度ゴールした事実は残す）。
   let bestClearSnapshot = null; // { moves, robots }
 
+  // チャレンジモード：先にコンピュータが最短手数を求め、その手数以下で
+  // ゴールしないと達成にならない。
+  let CHALLENGE_MODE = false;
+  let challengeTarget = null;     // この目標の最短手数（null = 計測中／不明）
+  let challengeWaitTimer = null;  // 最短手数の計測待ちタイマー
+
   // 進行中のアニメーション（移動・答え合わせの再生）を無効化するための世代番号。
   // 「次の問題へ」で配置を戻した後に、前の目標のアニメーションの続きが
   // 走ってロボットを動かしてしまうと、戻しかけの中途半端な配置になる。
@@ -527,6 +533,17 @@
   function checkGoalSuccess() {
     if (!currentGoal || roundState.cleared || roundState.answerRevealed) return;
     if (isAtGoal()) {
+      // チャレンジモード：最短手数を超えていたら達成にならない。
+      // 配置の記録（次の目標の開始位置）は通常どおり行う。
+      if (CHALLENGE_MODE && challengeTarget != null && historyIndex > challengeTarget) {
+        roundState.cleared = true;
+        recordClearSnapshot(historyIndex);
+        setStatus(
+          `ゴールしましたが ${historyIndex}手 かかりました。目標は ${challengeTarget}手以下です。元に戻すかリセットして挑戦し直せます。`,
+          "warn"
+        );
+        return;
+      }
       roundState.cleared = true;
       recordClearSnapshot(historyIndex);
       // クリア数は1つの目標につき1回だけ数える。「元に戻す」で
@@ -691,6 +708,12 @@
       if (solverStatus === "searching") showThinkingOverlay();
     }, 450);
     scheduleSolverTick(solverGeneration);
+    // チャレンジモードで「最短手数の計測」に失敗して出た画面からの再探索は、
+    // 答えを見せるのではなく計測を続ける。
+    if (CHALLENGE_MODE && challengeTarget == null) {
+      beginChallengeMeasurement();
+      return;
+    }
     pollSolverUntilSettled();
   }
 
@@ -776,6 +799,7 @@
     }
     hideThinkingOverlay();
     hideSolverFailedModal();
+    if (challengeWaitTimer) { clearInterval(challengeWaitTimer); challengeWaitTimer = null; }
     // 前の問題の探索器（IncrementalSolver）を確実に手放しておく。
     // 新しい問題では startSolverForGoal() が必ず新しいインスタンスを
     // 作り直すが、念のためここでも明示的に参照を切っておくことで、
@@ -873,6 +897,54 @@
     if (typeof window.scrollBoardIntoView === "function") window.scrollBoardIntoView();
 
     startSolverForGoal(currentGoal);
+    if (CHALLENGE_MODE) beginChallengeMeasurement();
+  }
+
+  // チャレンジモード：目標が出たら、まずコンピュータに最短手数を求めさせる。
+  // 求まるまでは盤面を操作できないようにし、「思考中」を表示しておく。
+  function beginChallengeMeasurement() {
+    challengeTarget = null;
+    updateChallengeTargetDisplay();
+    locked = true;
+    if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
+    showThinkingOverlay();
+    setStatus("🤖 コンピュータが最短手数を計測しています…", "");
+    const gen = solverGeneration; // 目標が切り替わったら打ち切る
+    if (challengeWaitTimer) clearInterval(challengeWaitTimer);
+    challengeWaitTimer = setInterval(() => {
+      if (gen !== solverGeneration) {
+        clearInterval(challengeWaitTimer);
+        challengeWaitTimer = null;
+        return;
+      }
+      if (solverStatus === "found") {
+        clearInterval(challengeWaitTimer);
+        challengeWaitTimer = null;
+        challengeTarget = solverPath.length;
+        hideThinkingOverlay();
+        locked = false;
+        updateChallengeTargetDisplay();
+        setStatus(`目標は ${challengeTarget}手以下 でゴールすることです。`, "");
+        if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
+      } else if (solverStatus === "not_found" || Date.now() > solverDeadline) {
+        // 最短手数が求められなかった目標は挑戦できないので、通常の
+        // 「見つかりませんでした」の画面に任せる（次の問題へ進める）。
+        solverStatus = "not_found";
+        clearInterval(challengeWaitTimer);
+        challengeWaitTimer = null;
+        hideThinkingOverlay();
+        locked = false;
+        if (typeof window.syncTouchDeck === "function") window.syncTouchDeck();
+        showSolverFailedModal();
+      }
+    }, 200);
+  }
+
+  function updateChallengeTargetDisplay() {
+    const stat = document.getElementById("challenge-target-stat");
+    const el = document.getElementById("challenge-target");
+    if (stat) stat.classList.toggle("hidden", !CHALLENGE_MODE);
+    if (el) el.textContent = challengeTarget == null ? "…" : `${challengeTarget}手以下`;
   }
 
   function updateGoalsCleared() {
@@ -1184,7 +1256,12 @@
   // タイトル画面（title.js）の「ゲームをはじめる」ボタンから呼び出される。
   // mode: "four"（デフォルト）または "five"（黒ロボットを追加）
   // useDiagonals: true の場合、斜め壁（任意設定）を有効にする
-  window.startHyperRobotsGame = function (mode, useDiagonals, presetState) {
+  // options.challenge = true でチャレンジモード（最短手数以下でゴールする）
+  window.startHyperRobotsGame = function (mode, useDiagonals, presetState, options) {
+    CHALLENGE_MODE = !!(options && options.challenge);
+    challengeTarget = null;
+    if (challengeWaitTimer) { clearInterval(challengeWaitTimer); challengeWaitTimer = null; }
+    updateChallengeTargetDisplay();
     // オンライン対戦から遷移してきた場合に備えて、オンライン専用の
     // 画面状態・進行中のタイマーなどを確実にリセットしておく
     window.__HR_ONLINE_ACTIVE = false;
@@ -1198,7 +1275,7 @@
     const newMapBtn = document.getElementById("btn-new-map");
     if (newMapBtn) newMapBtn.classList.remove("hidden");
     const playModeBadge = document.getElementById("play-mode-badge");
-    if (playModeBadge) playModeBadge.textContent = "一人用モード";
+    if (playModeBadge) playModeBadge.textContent = CHALLENGE_MODE ? "チャレンジモード" : "一人用モード";
     const roomIdBadge = document.getElementById("room-id-badge");
     if (roomIdBadge) roomIdBadge.classList.add("hidden");
     const playerBadge = document.getElementById("player-badge");
@@ -1286,6 +1363,7 @@
     getSolverStatus: () => solverStatus,
     getBoard: () => board,
     getCurrentGoal: () => currentGoal,
+    setChallengeTargetForTest: (n) => { challengeTarget = n; updateChallengeTargetDisplay(); },
     getActiveColors: () => ACTIVE_COLORS,
     solveCurrentGoalForTest: () => {
       const idx = currentGoal.color === "rainbow" ? "any" : colorIndexOf(currentGoal.color);

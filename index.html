@@ -45,6 +45,11 @@
       <div class="title-screen-panel hidden" id="screen-solo-settings">
         <button type="button" class="btn back-btn" id="btn-solo-back">← もどる</button>
         <h2 class="screen-heading">ソロモード設定</h2>
+        <div class="title-mode-select" role="group" aria-label="遊び方">
+          <button type="button" class="mode-option play-kind-option selected" data-kind="normal">通常</button>
+          <button type="button" class="mode-option play-kind-option" data-kind="challenge">チャレンジ</button>
+        </div>
+        <p class="title-mode-help" id="play-kind-help">通常：自由に考えてゴールを目指します。</p>
         <div class="title-mode-select" role="group" aria-label="ロボットの色数">
           <button type="button" class="mode-option selected" data-mode="four">4色モード</button>
           <button type="button" class="mode-option" data-mode="five">5色モード</button>
@@ -290,6 +295,10 @@
         <div class="stat" id="goals-cleared-stat">
           <span class="stat-label">達成ゴール</span>
           <span class="stat-value" id="goals-cleared">0</span>
+        </div>
+        <div class="stat hidden" id="challenge-target-stat">
+          <span class="stat-label">目標手数</span>
+          <span class="stat-value" id="challenge-target">…</span>
         </div>
       </div>
     </section>

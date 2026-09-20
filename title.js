@@ -67,11 +67,29 @@
     }
   }
 
+  let selectedKind = "normal"; // "normal" | "challenge"
+
   function buildSoloScreen() {
-    const modeButtons = Array.from(document.querySelectorAll("#screen-solo-settings .mode-option"));
+    // 色数のボタン（遊び方のボタンは data-kind を持つので除外する）
+    const modeButtons = Array.from(document.querySelectorAll("#screen-solo-settings .mode-option[data-mode]"));
+    const kindButtons = Array.from(document.querySelectorAll("#screen-solo-settings .play-kind-option"));
+    const kindHelp = document.getElementById("play-kind-help");
     const diagonalToggle = document.getElementById("diagonal-toggle");
     const backBtn = document.getElementById("btn-solo-back");
     const startBtn = document.getElementById("btn-solo-start");
+
+    const KIND_HELP = {
+      normal: "通常：自由に考えてゴールを目指します。",
+      challenge: "チャレンジ：先にコンピュータが最短手数を求めます。その手数以下でゴールできたら達成です。",
+    };
+
+    kindButtons.forEach((kbtn) => {
+      kbtn.addEventListener("click", () => {
+        selectedKind = kbtn.dataset.kind === "challenge" ? "challenge" : "normal";
+        kindButtons.forEach((b) => b.classList.toggle("selected", b === kbtn));
+        if (kindHelp) kindHelp.textContent = KIND_HELP[selectedKind];
+      });
+    });
 
     modeButtons.forEach((mbtn) => {
       mbtn.addEventListener("click", () => {
@@ -89,7 +107,7 @@
         document.getElementById("title-screen").classList.add("hidden");
         document.body.classList.remove("title-active");
         if (typeof window.startHyperRobotsGame === "function") {
-          window.startHyperRobotsGame(selectedMode, useDiagonals);
+          window.startHyperRobotsGame(selectedMode, useDiagonals, null, { challenge: selectedKind === "challenge" });
         }
       });
     }

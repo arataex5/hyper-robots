@@ -2456,3 +2456,11 @@ html {
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
+
+/* ソロモード設定：遊び方の説明文 */
+.title-mode-help {
+  margin: -4px 0 10px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
